@@ -23,7 +23,7 @@ Rust, Satisfactory, Project Zomboid, Ark: Survival, V Rising, Terraria,
 ## Installation
 
 1. **[Download the latest installer](https://github.com/KOBRA1325/Omnex/releases/latest)**
-   — grab the `Omnex Setup 1.x.x.exe` file under **Assets**.
+   — grab the `Omnex Setup` `.exe` file under **Assets**.
 2. Double-click the downloaded `.exe` and follow the prompts. (Windows may
    ask for administrator approval — this is needed for firewall rules and a
    per-machine install.)

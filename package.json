@@ -1,6 +1,6 @@
 {
   "name": "omnex",
-  "version": "1.0.1",
+  "version": "0.5.0",
   "description": "Omnex - Game Server Manager",
   "main": "main.js",
   "author": {
