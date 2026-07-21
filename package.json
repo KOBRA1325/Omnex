@@ -1,0 +1,94 @@
+{
+  "name": "omnex",
+  "version": "1.0.0",
+  "description": "Omnex - Game Server Manager",
+  "main": "main.js",
+  "author": {
+    "name": "Layerline Printing",
+    "email": "support@layerlineprinting.com"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/KOBRA1325/omnex",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KOBRA1325/omnex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KOBRA1325/omnex/issues"
+  },
+  "scripts": {
+    "start": "electron .",
+    "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win nsis --config.win.signAndEditExecutable=false",
+    "release": "electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "systeminformation": "^5.22.0",
+    "steam-session": "^1.9.2",
+    "steam-totp": "^2.1.2"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.layerline.omnex",
+    "productName": "Omnex",
+    "copyright": "Copyright \u00a9 2025 Layerline Printing",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "KOBRA1325",
+        "repo": "omnex",
+        "private": true,
+        "releaseType": "release"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "steam-auth.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "package.json",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md"
+    ],
+    "extraResources": [
+      { "from": "LICENSE", "to": "LICENSE" },
+      { "from": "THIRD_PARTY_NOTICES.md", "to": "THIRD_PARTY_NOTICES.md" }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false,
+      "sign": null,
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Omnex",
+      "uninstallDisplayName": "Omnex",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "license": "LICENSE",
+      "installerLanguages": ["en_US"],
+      "language": "1033"
+    }
+  }
+}

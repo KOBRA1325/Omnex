@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com data:">
+<title>Omnex</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+  </head>
+<body>
+
+<!-- WINDOW RESIZE HANDLES (invisible edges that trigger resize via IPC) -->
+<div class="resize-handle top"    data-dir="n"></div>
+<div class="resize-handle bottom" data-dir="s"></div>
+<div class="resize-handle left"   data-dir="w"></div>
+<div class="resize-handle right"  data-dir="e"></div>
+<div class="resize-handle tl"     data-dir="nw"></div>
+<div class="resize-handle tr"     data-dir="ne"></div>
+<div class="resize-handle bl"     data-dir="sw"></div>
+<div class="resize-handle br"     data-dir="se"></div>
+
+<!-- TITLEBAR -->
+<div class="titlebar" id="titlebar">
+  <div class="titlebar-drag">
+    <div class="titlebar-name">OMNI<span>EX</span></div>
+    <div class="titlebar-status">SYS <b id="sysStatus">NOMINAL</b> &nbsp;|&nbsp; <span id="clock">--:--:--</span></div>
+  </div>
+  <div class="titlebar-btns">
+    <button class="tbtn" id="themeToggleBtn" title="Toggle Theme">🌙</button>
+    <button class="tbtn" id="btnSettings" title="Settings">⚙️</button>
+    <button class="tbtn tbtn-storage" id="btnStorage" title="Storage Manager">🗄</button>
+    <button class="tbtn tbtn-min" onclick="window.nexus.minimize()" title="Minimize">─</button>
+    <button class="tbtn tbtn-max" onclick="window.nexus.maximize()" title="Maximize">□</button>
+    <button class="tbtn tbtn-close" onclick="window.nexus.close()" title="Close">✕</button>
+  </div>
+</div>
+
+<!-- APP UPDATE BANNER -->
+<div class="update-banner" id="updateBanner" style="display:none">
+  <span>🎉 Omnex <b id="updateVersion"></b> is available!</span>
+  <button onclick="openUpdate()">Download Update</button>
+  <button class="dismiss" onclick="document.getElementById('updateBanner').style.display='none'">✕</button>
+</div>
+
+<!-- WELCOME SCREEN - fixed overlay, outside layout so drag region can't block it -->
+<div class="welcome-overlay" id="welcomeView" style="display:none">
+  <div class="welcome-inner">
+    <div class="welcome-logo">
+      <div class="welcome-logo-icon">🎮</div>
+      <div class="welcome-logo-text">OMNI<span>EX</span></div>
+    </div>
+    <div class="welcome-tagline">Free game server manager — full control, zero limits</div>
+    <div class="welcome-features">
+      <div class="welcome-feature">
+        <span class="welcome-feature-icon">⚡</span>
+        <div>
+          <div class="welcome-feature-title">One-click installs</div>
+          <div class="welcome-feature-desc">Minecraft, Rust, Valheim, CS2 and more — no manual setup</div>
+        </div>
+      </div>
+      <div class="welcome-feature">
+        <span class="welcome-feature-icon">📊</span>
+        <div>
+          <div class="welcome-feature-title">Live console & stats</div>
+          <div class="welcome-feature-desc">Real-time output, CPU/RAM charts, player management</div>
+        </div>
+      </div>
+      <div class="welcome-feature">
+        <span class="welcome-feature-icon">💾</span>
+        <div>
+          <div class="welcome-feature-title">Backups & scheduling</div>
+          <div class="welcome-feature-desc">Automatic backups, scheduled restarts, crash recovery</div>
+        </div>
+      </div>
+    </div>
+    <button class="welcome-btn" onclick="dismissWelcome()" style="pointer-events:all !important; position:relative; z-index:1002; cursor:pointer">
+      Get Started &nbsp;→
+    </button>
+    <label class="welcome-checkbox" style="display:flex; align-items:center; gap:8px; margin-top:14px; cursor:pointer; font-size:12px; color:var(--text-dim); user-select:none">
+      <input type="checkbox" id="welcomeDontShow" style="cursor:pointer; width:14px; height:14px; accent-color:var(--accent)">
+      <span>Don't show this again</span>
+    </label>
+    <div class="welcome-version" id="welcomeVersion"></div>
+  </div>
+</div>
+
+<!-- LAYOUT -->
+<div class="layout">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-nav">
+      <button class="nav-btn active" id="navDashboard" onclick="showView('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </button>
+      <button class="nav-btn" id="navServers" onclick="showView('servers')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="4" rx="1"/><rect x="2" y="10" width="20" height="4" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>
+        Servers
+      </button>
+    </div>
+    <div class="sidebar-section" id="serverListLabel" style="display:none">Game Servers</div>
+    <div class="server-list" id="serverList">
+      <div class="empty-msg">No servers yet.<br/>Click + Add Server below.</div>
+    </div>
+    <button class="add-server-btn" onclick="openAddModal()">+ Add Server</button>
+  </div>
+
+  <!-- DASHBOARD VIEW -->
+  <div class="dashboard-view" id="dashboardView">
+    <div class="dashboard-header">
+      <div class="dashboard-title">Overview</div>
+      <div class="dashboard-subtitle" id="dashSubtitle">Loading...</div>
+    </div>
+    <div class="dashboard-grid" id="dashboardGrid">
+      <div class="empty-msg" style="grid-column:1/-1; padding:40px">No servers yet. Click + Add Server to get started.</div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main" id="mainView">
+
+    <!-- SERVER HEADER -->
+    <div class="server-header">
+      <div class="server-header-icon" id="hdrIcon">🎮</div>
+      <div class="server-header-info">
+        <div class="server-header-name" id="hdrName">Select a Server</div>
+        <div class="server-header-meta" id="hdrMeta">
+          <div class="meta-badge"><div class="dot" style="background:var(--text-dim)"></div> No server selected</div>
+        </div>
+      </div>
+      <div class="ctrl-row">
+        <button class="btn btn-start"   id="btnStart"   onclick="serverAction('start')"   disabled>
+          <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Start
+        </button>
+        <button class="btn btn-stop"    id="btnStop"    onclick="serverAction('stop')"    disabled>
+          <svg viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg> Stop
+        </button>
+        <button class="btn btn-restart" id="btnRestart" onclick="serverAction('restart')" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Restart
+        </button>
+        <button class="btn btn-update" id="btnUpdate" onclick="updateCurrentServer()" disabled title="Update server files">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Update
+        </button>
+        <button class="btn btn-config" id="btnConfig" onclick="openConfigModal()" disabled title="Server settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+          Config
+        </button>
+        <button class="btn btn-schedule" id="btnSchedule" onclick="openScheduleModal()" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Schedule
+        </button>
+        <button class="btn btn-backup" id="btnBackup" onclick="createManualBackup()" disabled title="Create Backup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Backup
+        </button>
+        <button class="btn btn-remove" id="btnRemove" onclick="removeCurrentServer()" disabled title="Remove Server">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content">
+
+      <!-- CONSOLE -->
+      <div class="console-panel">
+        <div class="console-topbar">
+          <div class="console-title">Live Console</div>
+          <div class="console-live-badge" id="liveBadge"><div class="live-dot"></div> LIVE</div>
+          <div class="console-search-wrap" id="consoleSearchWrap" style="display:none">
+            <input class="console-search-input" id="consoleSearchInput"
+              placeholder="Search console..."
+              oninput="searchConsole(this.value)"
+              onkeydown="searchConsoleKey(event)" style="pointer-events:all" />
+            <span class="console-search-count" id="consoleSearchCount"></span>
+            <button class="console-search-close" onclick="closeConsoleSearch()">✕</button>
+          </div>
+          <button class="console-clear" onclick="toggleConsoleSearch()" title="Search (Ctrl+F)">🔍</button>
+          <button class="console-clear" onclick="clearConsole()">Clear</button>
+        </div>
+        <div class="console-output" id="consoleOutput">
+          <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-dim">Omnex ready. Select or add a server to begin.</span></div>
+        </div>
+        <div class="console-input-row">
+          <div class="console-prompt">&gt;_</div>
+          <input class="console-input" id="consoleInput" placeholder="Send command to server..." onkeydown="handleCmd(event)" style="pointer-events:all;">
+          <button class="console-send" onclick="sendCommand()">Send</button>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL -->
+      <div class="right-panel">
+
+        <div class="card" id="statsCard">
+          <div class="card-header collapsible" onclick="toggleCard('statsCard')">📊 &nbsp;Server Stats <span class="card-chevron">▾</span></div>
+          <div class="card-body">
+            <div class="stats-grid">
+              <div class="stat-item">
+                <div class="stat-label">Sys CPU</div>
+                <div class="stat-value accent" id="statCpu">—</div>
+                <div class="stat-bar"><div class="stat-fill fill-accent" id="barCpu" style="width:0%"></div></div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">Sys RAM</div>
+                <div class="stat-value green" id="statRam">—</div>
+                <div class="stat-bar"><div class="stat-fill fill-green" id="barRam" style="width:0%"></div></div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">Uptime</div>
+                <div class="stat-value" id="statUptime">—</div>
+              </div>
+              <div class="stat-item">
+                <div class="stat-label">Players</div>
+                <div class="stat-value" id="statPlayers">—</div>
+              </div>
+            </div>
+            <canvas id="statsChart" height="52" style="margin-top:10px; width:100%"></canvas>
+          </div>
+        </div>
+
+        <div class="card" id="schedCard">
+          <div class="card-header collapsible" onclick="toggleCard('schedCard')">⏰ &nbsp;Scheduled Tasks <span class="card-chevron">▾</span></div>
+          <div class="card-body">
+            <div class="schedule-list" id="scheduleList">
+              <div class="empty-msg-sm">No tasks scheduled.</div>
+            </div>
+            <button class="add-sched-btn" onclick="openScheduleModal()">+ Add Task</button>
+          </div>
+        </div>
+
+        <div class="card" id="backupCard">
+          <div class="card-header collapsible" onclick="toggleCard('backupCard')">
+            💾 &nbsp;Backups
+            <span class="backup-auto-badge" id="backupAutoBadge" style="display:none">AUTO</span>
+            <span class="card-chevron" style="margin-left:auto">▾</span>
+          </div>
+          <div class="card-body card-body-collapsible" id="backupCardBody">
+            <div class="empty-msg-sm">Select a server to manage backups.</div>
+          </div>
+        </div>
+
+        <div class="card" id="playersCard">
+          <div class="card-header collapsible" onclick="toggleCard('playersCard')">
+            👥 &nbsp;Players
+            <span id="playerCount" style="font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-dim)"></span>
+            <span class="card-chevron" style="margin-left:auto">▾</span>
+          </div>
+          <div class="card-body" style="padding:0">
+            <div class="player-list" id="playerList">
+              <div class="empty-msg-sm" style="padding:12px">No server selected</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="notesCard">
+          <div class="card-header collapsible" onclick="toggleCard('notesCard')">📝 &nbsp;Server Notes <span class="card-chevron">▸</span></div>
+          <div class="card-body card-body-collapsible" style="display:none">
+            <textarea class="notes-input" id="serverNotes"
+              placeholder="IP address, admin password, mod list, anything useful..."
+              onblur="saveNotes()" style="pointer-events:all"></textarea>
+          </div>
+        </div>
+
+        <div class="card" id="networkCard">
+          <div class="card-header collapsible" onclick="toggleCard('networkCard')">🌐 &nbsp;Network Info <span class="card-chevron">▾</span></div>
+          <div class="card-body" id="networkCardBody">
+            <div class="empty-msg-sm">Select a server to view network info.</div>
+          </div>
+        </div>
+
+        <div class="card" id="configCard2">
+          <div class="card-header collapsible" onclick="toggleCard('configCard2')">⚙️ &nbsp;Server Config <span class="card-chevron">▸</span></div>
+          <div class="card-body card-body-collapsible" id="configCard" style="display:none">
+            <div class="empty-msg-sm">Select a server to configure.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SERVER CONFIG MODAL -->
+<div class="modal-overlay" id="configModal">
+  <div class="modal modal-wide modal-tall" style="width:min(760px, 94vw); height:min(720px, 92vh)">
+    <div class="modal-title">
+      <span>⚙️ &nbsp;<span id="configModalTitle">Server Config</span></span>
+      <button class="btn-modal-cancel" onclick="closeConfigModal()">✕ Close</button>
+    </div>
+    <div style="padding:8px 16px 0; color:var(--text-dim); font-size:11px" id="configModalSubtitle"></div>
+    <div style="padding:10px 16px 0; position:relative">
+      <input type="text" id="configModalSearch" placeholder="🔍 Search settings..."
+        oninput="filterConfigModal(this.value)"
+        onkeydown="if(event.key==='Escape'){this.value='';filterConfigModal('');event.stopPropagation();}"
+        style="width:100%; padding:9px 34px 9px 12px; background:var(--surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:'Exo 2',sans-serif; font-size:13px; outline:none">
+      <button id="configModalSearchClear" onclick="clearConfigModalSearch()"
+        style="display:none; position:absolute; right:22px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:4px 6px">✕</button>
+    </div>
+    <div id="configModalBody" style="padding:14px 16px; overflow-y:auto; flex:1">
+      <div class="empty-msg-sm">Select a server first.</div>
+    </div>
+    <div class="modal-actions">
+      <div style="flex:1; font-size:10px; color:var(--text-dim); font-family:'Share Tech Mono',monospace" id="configModalHint">💡 Changes apply on next server start</div>
+      <button class="btn-modal-cancel" onclick="closeConfigModal()">Close</button>
+      <button class="btn-modal-save" id="configModalSaveBtn" onclick="saveConfigModal()">💾 Save Config</button>
+    </div>
+  </div>
+</div>
+
+<!-- SCHEDULE MODAL -->
+<div class="modal-overlay" id="schedModal">
+  <div class="modal">
+    <div class="modal-title">⏰ &nbsp;New <span>Scheduled Task</span></div>
+    <div class="form-row">
+      <label class="form-label">Action</label>
+      <select class="form-select" id="schedAction" onchange="onSchedActionChange()" style="pointer-events:all;">
+        <option value="restart">🔄 Restart Server</option>
+        <option value="stop">⏹ Stop Server</option>
+        <option value="start">▶ Start Server</option>
+        <option value="backup">💾 Backup World</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Frequency</label>
+      <select class="form-select" id="schedFreq" style="pointer-events:all;">
+        <option value="Daily">Daily</option>
+        <option value="Weekly">Weekly</option>
+        <option value="Hourly">Every Hour</option>
+        <option value="6hours">Every 6 Hours</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Time (24h)</label>
+      <input type="time" class="form-input" id="schedTime" value="03:00" style="pointer-events:all;">
+    </div>
+    <div class="form-row" id="schedBackupOptions" style="display:none">
+      <label class="form-label">Keep Last</label>
+      <select class="form-select" id="schedBackupKeep" style="pointer-events:all;">
+        <option value="3">3 backups</option>
+        <option value="5" selected>5 backups</option>
+        <option value="10">10 backups</option>
+        <option value="20">20 backups</option>
+        <option value="0">Unlimited</option>
+      </select>
+      <div class="form-hint" style="margin-top:6px">Once the limit is reached, the oldest backup is automatically deleted.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="closeScheduleModal()">Cancel</button>
+      <button class="btn-modal-save" onclick="saveSchedule()">Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD SERVER MODAL -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal modal-wide">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>➕ &nbsp;<span id="addModalTitleText">Install</span> <span>Game Server</span></span>
+      <div class="modal-tab-row">
+        <button class="modal-tab active" id="tabInstall" onclick="switchAddTab('install')">Install New</button>
+        <button class="modal-tab" id="tabImport" onclick="switchAddTab('import')">Import Existing</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label">Select Game</label>
+      <div class="game-grid-wrap">
+        <div class="game-grid" id="gameGrid"></div>
+      </div>
+    </div>
+    <!-- Import panel (hidden by default) -->
+    <div id="importPanel" style="display:none">
+      <div class="form-row">
+        <label class="form-label">Server Folder</label>
+        <div class="browse-row">
+          <input type="text" class="form-input" id="importPath" placeholder="C:\servers\my-minecraft-server" readonly style="pointer-events:all;">
+          <button class="btn-browse" onclick="browseImportFolder()">Browse…</button>
+        </div>
+        <div class="form-hint">Point to an existing server folder you already have set up</div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Game</label>
+        <div class="game-grid-wrap" id="importGameGrid">
+          <div class="game-grid" id="importGameGridInner"></div>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Server Name</label>
+        <input type="text" class="form-input" id="importName" placeholder="My Existing Server" tabindex="1" style="pointer-events:all;">
+      </div>
+      <div class="form-row">
+        <label class="form-label">Port</label>
+        <input type="text" class="form-input" id="importPort" placeholder="25565" style="pointer-events:all;">
+      </div>
+      <div class="install-info">
+        <div class="install-info-icon">ℹ️</div>
+        <div class="install-info-text">Omnex will add this server without modifying any files. Your existing world data and configs are untouched.</div>
+      </div>
+    </div>
+
+    <!-- Install panel (shown by default) -->
+    <div id="installPanel">
+    <!-- Templates -->
+    <div id="templatesRow" style="margin-bottom:10px; display:none">
+      <label class="form-label">Load from Template</label>
+      <div class="template-list" id="templateList"></div>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">Server Name</label>
+      <input type="text" class="form-input" id="newSrvName" placeholder="My Server" tabindex="1" style="pointer-events:all;">
+    </div>
+    <div class="form-row">
+      <label class="form-label">Port</label>
+      <input type="text" class="form-input" id="newSrvPort" placeholder="25565" tabindex="2" style="pointer-events:all;">
+    </div>
+    <!-- Minecraft extra options (shown only for Minecraft) -->
+    <div id="mcOptions" style="display:none">
+      <div class="form-row">
+        <label class="form-label">Server Type</label>
+        <div class="mc-type-grid" id="mcTypeGrid">
+          <div class="mc-type-btn active" data-type="vanilla" onclick="pickMcType('vanilla')">
+            <span class="mc-type-icon">🟩</span><span>Vanilla</span><small>Official Mojang</small>
+          </div>
+          <div class="mc-type-btn" data-type="paper" onclick="pickMcType('paper')">
+            <span class="mc-type-icon">📄</span><span>Paper</span><small>Optimized + Plugins</small>
+          </div>
+          <div class="mc-type-btn" data-type="fabric" onclick="pickMcType('fabric')">
+            <span class="mc-type-icon">🧵</span><span>Fabric</span><small>Lightweight Mods</small>
+          </div>
+          <div class="mc-type-btn" data-type="forge" onclick="pickMcType('forge')">
+            <span class="mc-type-icon">🔨</span><span>Forge</span><small>Heavy Modpacks</small>
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">Minecraft Version</label>
+        <select class="form-select" id="mcVersionSelect" style="pointer-events:all;">
+          <option value="latest">Loading versions...</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="install-info" id="installInfo">
+      <div class="install-info-icon">ℹ️</div>
+      <div class="install-info-text" id="installInfoText">Omnex will automatically download and install the server files for you.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="closeAddModal()">Cancel</button>
+      <button class="btn-modal-save" id="btnInstall" onclick="addModalAction()">
+        ⬇ Install Server
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- STORAGE MODAL -->
+<div class="modal-overlay" id="storageModal">
+  <div class="modal modal-wide">
+    <div class="modal-title">🗄 &nbsp;Storage <span>Manager</span></div>
+    <div id="storageContent">
+      <div class="empty-msg-sm">Loading storage info...</div>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-modal-cancel" onclick="closeStorageModal()">Close</button>
+      <button class="btn-modal-save" onclick="refreshStorage()">🔄 Refresh</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOG VIEWER MODAL -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal modal-wide modal-tall">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>📋 &nbsp;Log <span id="logModalTitle">Files</span></span>
+      <div style="display:flex; gap:8px; align-items:center">
+        <input class="form-input" id="logSearchInput" placeholder="Search logs..."
+          oninput="filterLogContent(this.value)"
+          style="width:180px; font-size:11px; padding:5px 8px;pointer-events:all" />
+        <button class="btn-modal-cancel" onclick="closeLogModal()">✕ Close</button>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:180px 1fr; gap:12px; height:100%">
+      <div class="log-file-list" id="logFileList"></div>
+      <div class="log-file-content" id="logFileContent">
+        <div class="empty-msg-sm">Select a log file to view</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MOD MANAGER MODAL -->
+<div class="modal-overlay" id="modModal">
+  <div class="modal modal-wide modal-tall">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>🧩 &nbsp;Mod Manager · <span id="modModalTitle"></span></span>
+      <button class="btn-modal-cancel" onclick="closeModModal()">✕ Close</button>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; height:100%; min-height:0">
+      <!-- Installed -->
+      <div style="display:flex; flex-direction:column; gap:8px; min-height:0">
+        <div class="config-group-label" style="margin:0">📦 Installed Mods</div>
+        <div class="mod-installed-list" id="installedModList">
+          <div class="empty-msg-sm">Loading...</div>
+        </div>
+      </div>
+      <!-- Browse -->
+      <div style="display:flex; flex-direction:column; gap:8px; min-height:0">
+        <div class="config-group-label" style="margin:0">🔍 Browse Modrinth</div>
+        <div style="display:flex; gap:6px">
+          <input class="form-input" id="modSearchQuery" placeholder="Search mods..."
+            onkeydown="if(event.key==='Enter') searchMods()"
+            style="flex:1; font-size:11px; padding:6px 10px;pointer-events:all" />
+          <button class="btn-modal-save" style="padding:6px 14px; font-size:11px" onclick="searchMods()">Search</button>
+        </div>
+        <div class="mod-search-results" id="modSearchResults">
+          <div class="empty-msg-sm">Search for mods above</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal modal-wide">
+    <div class="modal-title">⚙️ &nbsp;<span>Settings</span></div>
+
+    <div class="settings-sections">
+      <div class="settings-section">
+        <div class="config-group-label">🎨 Appearance</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">App Text Size</div>
+            <div class="settings-row-desc">Scale all text throughout the app</div>
+          </div>
+          <select class="config-input" style="pointer-events:all;width:130px" id="setAppTextScale" onchange="saveSetting('appTextScale', parseFloat(this.value)); applyTextScale(parseFloat(this.value));">
+            <option value="0.85">Small (85%)</option>
+            <option value="1.0">Normal (100%)</option>
+            <option value="1.15">Large (115%)</option>
+            <option value="1.3">Extra Large (130%)</option>
+            <option value="1.5">Huge (150%)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">🔔 Notifications</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Enable Notifications</div>
+            <div class="settings-row-desc">Windows toast notifications for server events</div>
+          </div>
+          <button class="cfg-bool-btn" id="setNotifications" onclick="toggleSetting('notifications', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Notify on Crash</div>
+            <div class="settings-row-desc">Alert when a server crashes unexpectedly</div>
+          </div>
+          <button class="cfg-bool-btn" id="setNotifyOnCrash" onclick="toggleSetting('notifyOnCrash', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Notify on Backup</div>
+            <div class="settings-row-desc">Alert when an automatic backup completes</div>
+          </div>
+          <button class="cfg-bool-btn" id="setNotifyOnBackup" onclick="toggleSetting('notifyOnBackup', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Notify on Player Join</div>
+            <div class="settings-row-desc">Alert when a player joins any server</div>
+          </div>
+          <button class="cfg-bool-btn" id="setNotifyOnPlayerJoin" onclick="toggleSetting('notifyOnPlayerJoin', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">🖥 Console</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Max Console Lines</div>
+            <div class="settings-row-desc">Older lines are trimmed to keep the app fast</div>
+          </div>
+          <select class="config-input" style="pointer-events:all;width:110px" id="setMaxConsoleLines" onchange="saveSetting('maxConsoleLines', parseInt(this.value))">
+            <option value="200">200</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+            <option value="2000">2000</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Console Font Size</div>
+            <div class="settings-row-desc">Size of text in the live console</div>
+          </div>
+          <select class="config-input" style="pointer-events:all;width:110px" id="setConsoleFontSize" onchange="saveSetting('consoleFontSize', parseInt(this.value))">
+            <option value="10">10px</option>
+            <option value="11">11px</option>
+            <option value="12">12px</option>
+            <option value="13">13px</option>
+            <option value="14">14px</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">💾 Backups</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Default Backup Retention</div>
+            <div class="settings-row-desc">How many backups to keep by default</div>
+          </div>
+          <select class="config-input" style="pointer-events:all;width:110px" id="setDefaultBackupKeep" onchange="saveSetting('defaultBackupKeep', parseInt(this.value))">
+            <option value="5">5 backups</option>
+            <option value="10">10 backups</option>
+            <option value="20">20 backups</option>
+            <option value="0">Unlimited</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">🌐 Remote Access</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Local Network Access</div>
+            <div class="settings-row-desc">Control servers from your phone or laptop on the same WiFi</div>
+          </div>
+          <button class="cfg-bool-btn" id="setRemoteAccess" onclick="toggleRemoteAccess(this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div id="remoteAccessInfo" style="display:none">
+          <div class="remote-access-url" id="remoteAccessUrl">Starting...</div>
+          <div style="font-size:10px; color:var(--text-dim); margin-top:4px">Open this URL on any device on your network</div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">🚀 Startup</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Start Minimized</div>
+            <div class="settings-row-desc">Launch Omnex minimized to taskbar</div>
+          </div>
+          <button class="cfg-bool-btn" id="setStartMinimized" onclick="toggleSetting('startMinimized', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Minimize to Tray</div>
+            <div class="settings-row-desc">Closing the window keeps Omnex running in the system tray</div>
+          </div>
+          <button class="cfg-bool-btn" id="setMinimizeToTray" onclick="toggleSetting('minimizeToTray', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">🔗 Connections</div>
+
+        <!-- Steam -->
+        <div class="connection-card" id="steamConnectionCard">
+          <div class="connection-icon">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.236 2.636 7.855 6.356 9.312-.088-.791-.167-2.005.035-2.868.182-.78 1.172-4.97 1.172-4.97s-.299-.598-.299-1.482c0-1.388.806-2.428 1.808-2.428.852 0 1.265.64 1.265 1.408 0 .858-.546 2.141-.828 3.33-.236.995.499 1.806 1.476 1.806 1.771 0 3.132-1.867 3.132-4.562 0-2.387-1.716-4.054-4.165-4.054-2.837 0-4.502 2.128-4.502 4.326 0 .856.33 1.775.741 2.276a.3.3 0 0 1 .069.286c-.076.314-.244.995-.277 1.134-.044.183-.145.222-.334.134-1.249-.581-2.03-2.407-2.03-3.874 0-3.154 2.292-6.052 6.608-6.052 3.469 0 6.165 2.473 6.165 5.776 0 3.447-2.173 6.22-5.19 6.22-1.013 0-1.966-.527-2.292-1.148l-.623 2.378c-.226.869-.835 1.958-1.244 2.621.937.29 1.931.446 2.962.446 5.523 0 10-4.477 10-10S17.523 2 12 2z"/></svg>
+          </div>
+          <div class="connection-info">
+            <div class="connection-name">Steam Account</div>
+            <div class="connection-status" id="steamConnectionStatus">Not connected</div>
+          </div>
+          <div class="connection-actions" id="steamConnectionActions">
+            <button class="btn-connection-connect" onclick="openSteamConnect()">Connect</button>
+          </div>
+        </div>
+
+        <!-- Steam connection is managed in Settings → Connections -->
+        <div id="steamConnectForm" style="display:none; margin-top:10px">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px">
+            <div>
+              <label class="form-label">Steam Username</label>
+              <input type="text" class="form-input" id="settingsSteamUser"
+                placeholder="your_steam_username"
+                style="font-size:11px;pointer-events:all" />
+            </div>
+            <div>
+              <label class="form-label">Steam Password</label>
+              <input type="password" class="form-input" id="settingsSteamPass"
+                placeholder="••••••••"
+                style="font-size:11px;pointer-events:all" />
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom:8px">
+            <label class="form-label" style="color:var(--yellow)">Steam Guard Code <span style="font-weight:400;color:var(--text-dim)">(from mobile app or email)</span></label>
+            <input type="text" class="form-input" id="settingsSteamGuard" placeholder="e.g. ABC12" maxlength="8" style="pointer-events:all;font-size:13px; letter-spacing:4px; font-family:monospace; text-transform:uppercase" />
+          </div>
+          <div class="form-hint" style="margin-bottom:8px">
+            We'll verify your login with Steam now. After this works once, future installs and mod downloads will use the cached session — no Steam Guard prompts needed.
+            <br><br>
+            Your password is used only to authenticate with SteamCMD on your machine. It is never sent anywhere else.
+            If you have Steam Guard enabled you will be prompted for the code in the console when first connecting.
+          </div>
+          <div style="display:flex; gap:8px">
+            <button class="btn-modal-save" style="padding:7px 18px; font-size:11px" onclick="saveSteamConnection()">Save & Connect</button>
+            <button class="btn-modal-cancel" onclick="closeSteamConnect()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">ℹ️ About Omnex</div>
+        <div class="settings-row" style="align-items:flex-start; flex-direction:column; gap:8px">
+          <div style="display:flex; align-items:baseline; gap:12px; font-family:'Rajdhani',sans-serif">
+            <div style="font-size:22px; letter-spacing:3px; color:var(--accent); font-weight:700">OMNI<span style="color:var(--text-bright)">EX</span></div>
+            <div id="aboutVersion" style="font-family:'Share Tech Mono',monospace; font-size:11px; color:var(--text-dim)">v1.0.0</div>
+          </div>
+          <div style="font-size:11px; color:var(--text-dim); line-height:1.6">
+            Free game server manager for Windows.<br>
+            © 2025 Layerline Printing. All rights reserved.<br>
+            <br>
+            Omnex is a proprietary tool built on top of open-source software.<br>
+            All game names and trademarks belong to their respective publishers.<br>
+            Omnex is not affiliated with any game publisher.
+          </div>
+          <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap">
+            <button class="btn-modal-cancel" style="font-size:11px; padding:6px 12px" onclick="openLicenseInfo()">📜 License</button>
+            <button class="btn-modal-cancel" style="font-size:11px; padding:6px 12px" onclick="openThirdPartyInfo()">📦 Third-Party Notices</button>
+            <button class="btn-modal-cancel" style="font-size:11px; padding:6px 12px" onclick="checkForUpdates()">⬆️ Check for Updates</button>
+          </div>
+        </div>
+      </div>
+
+    <div class="modal-actions">
+      <div style="font-size:10px; color:var(--text-dim); font-family:'Share Tech Mono',monospace" id="settingsVersion"></div>
+      <button class="btn-modal-cancel" onclick="resetWelcomeScreen()" title="Show the welcome screen on next launch">Show Welcome Again</button>
+      <button class="btn-modal-cancel" onclick="closeSettingsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ARMA 3 WORKSHOP MOD MANAGER -->
+<div class="modal-overlay" id="workshopModal">
+  <div class="modal modal-wide modal-tall">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>🪖 &nbsp;Arma 3 <span>Workshop Mods</span></span>
+      <div style="display:flex; gap:6px; align-items:center">
+        <button class="btn-storage-action" onclick="importArma3Preset()" style="background:rgba(0,229,255,0.1); border-color:rgba(0,229,255,0.3); color:var(--accent)">📋 Import Launcher Preset (.html)</button>
+        <button class="btn-modal-cancel" onclick="closeWorkshopModal()">✕ Close</button>
+      </div>
+      <input type="file" id="presetFileInput" accept=".html,.htm" style="display:none" />
+    </div>
+
+    <!-- Steam login section -->
+    <div class="workshop-login-section" id="workshopLoginSection">
+      <div class="workshop-login-notice">
+        <div class="install-info-icon">🔐</div>
+        <div>
+          <div style="font-weight:700; color:var(--text-bright); margin-bottom:4px">Steam Login Required</div>
+          <div style="font-size:11px; color:var(--text-dim); line-height:1.5">
+            Workshop mods require a Steam account that owns Arma 3.<br>
+            Your credentials are stored locally and only used to download mods via SteamCMD.
+          </div>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px">
+        <div class="form-row">
+          <label class="form-label">Steam Username</label>
+          <input type="text" class="form-input" id="steamUsername" placeholder="your_steam_username" style="pointer-events:all" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">Steam Password</label>
+          <input type="password" class="form-input" id="steamPassword" placeholder="••••••••" style="pointer-events:all" />
+        </div>
+      </div>
+      <div class="form-hint" style="margin-top:4px">⚠ Steam Guard: if you have 2FA enabled, you'll be prompted in the console when downloading starts.</div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; flex:1; min-height:0; margin-top:12px">
+      <!-- Antistasi preset -->
+      <div style="display:flex; flex-direction:column; gap:8px; min-height:0">
+        <div class="config-group-label" style="margin:0">
+          📦 Antistasi Ultimate Preset
+          <button class="btn-storage-action" style="margin-left:auto" onclick="selectAllRequiredMods()">Select Required</button>
+        </div>
+        <div class="workshop-mod-list" id="antistasiModList">
+          <div class="empty-msg-sm">Loading...</div>
+        </div>
+
+        <div class="config-group-label" style="margin:0">➕ Add Custom Mod</div>
+        <div class="browse-row">
+          <input type="text" class="form-input" id="customModId" placeholder="Steam Workshop ID (e.g. 450814997)"
+            style="font-size:11px;pointer-events:all" />
+          <input type="text" class="form-input" id="customModName" placeholder="Mod name"
+            style="font-size:11px; max-width:140px;pointer-events:all" />
+          <button class="btn-browse" onclick="addCustomMod()">Add</button>
+        </div>
+      </div>
+
+      <!-- Installed mods -->
+      <div style="display:flex; flex-direction:column; gap:8px; min-height:0">
+        <div class="config-group-label" style="margin:0">✅ Installed Mods
+          <span id="installedModCount" style="margin-left:auto; font-size:10px; color:var(--text-dim)"></span>
+        </div>
+        <div class="workshop-mod-list" id="installedWorkshopMods">
+          <div class="empty-msg-sm">No mods installed yet.</div>
+        </div>
+        <div style="margin-top:auto">
+          <div class="config-group-label" style="margin-bottom:6px">🚀 Launch Line</div>
+          <div class="workshop-launch-line" id="workshopLaunchLine">No mods loaded</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn-modal-cancel" onclick="closeWorkshopModal()">Cancel</button>
+      <button class="btn-modal-save" id="btnDownloadMods" onclick="downloadSelectedMods()">
+        ⬇ Download Selected Mods
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- STEAM GUARD ALERT BANNER -->
+<div id="steamGuardAlert" style="display:none; position:fixed; top:60px; left:50%; transform:translateX(-50%); z-index:8000; background:linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,165,0,0.1)); border:2px solid var(--yellow); border-radius:10px; padding:14px 20px; min-width:380px; max-width:520px; box-shadow:0 8px 30px rgba(0,0,0,0.5), 0 0 30px rgba(255,215,0,0.2); ">
+  <div style="display:flex; align-items:flex-start; gap:12px">
+    <div style="font-size:28px; line-height:1">🔐</div>
+    <div style="flex:1">
+      <div style="font-family:'Rajdhani',sans-serif; font-weight:700; font-size:15px; color:var(--yellow); letter-spacing:0.5px; margin-bottom:4px">STEAM GUARD APPROVAL NEEDED</div>
+      <div style="font-size:12px; color:var(--text-bright); line-height:1.5">
+        Open your <b>Steam Mobile app</b> and tap <b>Approve</b> to authorize the login.<br>
+        <span style="color:var(--text-dim); font-size:11px">You have ~30 seconds before it times out.</span>
+      </div>
+    </div>
+    <button onclick="hideSteamGuardAlert()" style="background:transparent; border:1px solid var(--border); color:var(--text-dim); border-radius:4px; padding:4px 10px; cursor:pointer; font-size:11px; font-family:inherit">Got it</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<!-- STEAM QR CODE MODAL -->
+<div class="modal-overlay" id="steamQrModal" style="display:none">
+  <div class="modal" style="text-align:center; max-width:340px">
+    <div class="modal-title" style="justify-content:center">
+      🔐 &nbsp;<span>Steam Guard QR Code</span>
+    </div>
+    <p style="font-size:12px; color:var(--text-dim); margin-bottom:16px; line-height:1.5">
+      Scan this QR code with your <b style="color:var(--text-bright)">Steam Mobile app</b> to authorize the login.
+      Open Steam → tap the <b style="color:var(--text-bright)">menu icon → Sign in via QR</b>
+    </p>
+    <div id="steamQrContainer" style="display:flex; justify-content:center; margin:16px 0; background:white; padding:12px; border-radius:8px">
+      <canvas id="steamQrCanvas"></canvas>
+    </div>
+    <p style="font-size:11px; color:var(--text-dim); margin-bottom:16px">
+      QR codes expire quickly — if it stops working, close and try again
+    </p>
+    <button class="btn-modal-cancel" onclick="hideModal('steamQrModal')" style="width:100%">Close</button>
+  </div>
+</div>
+
+<div class="toast" id="toast">
+  <span class="toast-icon" id="toastIcon">✅</span>
+  <span id="toastMsg">Done</span>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

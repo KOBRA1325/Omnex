@@ -1,0 +1,55 @@
+# Dependencies (rebuilt from package.json)
+node_modules/
+package-lock.json.bak
+
+# Build output
+dist/
+out/
+*.exe
+*.msi
+*.zip
+
+# Electron cache
+.electron-cache/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+*.pfx
+
+# Code signing
+CSC_LINK
+CSC_KEY_PASSWORD
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime app data (user-specific, not source)
+steam_creds.json
+steam_tokens.json
+settings.json
+appData.json
+
+# Uploaded / user-provided files during dev
+/mnt/
+uploads/
+
+# Test scratchpad
+modal_test.html
+scratch/

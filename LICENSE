@@ -1,0 +1,62 @@
+Omnex — End User License Agreement
+
+Copyright (c) 2025 Layerline Printing. All rights reserved.
+
+This software and its associated files (the "Software") are proprietary and
+confidential. By downloading, installing, or using the Software, you agree
+to the terms below.
+
+1. GRANT OF LICENSE
+
+   You are granted a non-exclusive, non-transferable, revocable license to
+   install and use one (1) copy of the Software on your personal or business
+   computers for the purpose of managing game servers.
+
+2. RESTRICTIONS
+
+   You may not:
+     (a) Copy, modify, merge, or create derivative works of the Software.
+     (b) Reverse engineer, decompile, or disassemble the Software, except and
+         only to the extent expressly permitted by applicable law.
+     (c) Rent, lease, sublicense, distribute, or sell the Software or grant
+         access to it as a service to third parties.
+     (d) Remove, alter, or obscure any copyright, trademark, or other
+         proprietary notices contained in the Software.
+
+3. OWNERSHIP
+
+   Layerline Printing retains all right, title, and interest in and to the
+   Software, including all intellectual property rights therein. No title
+   or ownership transfers to you under this license.
+
+4. THIRD-PARTY COMPONENTS
+
+   The Software includes certain open-source components, each subject to
+   their own license terms. See THIRD_PARTY_NOTICES.md for details.
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES,
+   OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE,
+   ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+   OTHER DEALINGS IN THE SOFTWARE.
+
+7. TERMINATION
+
+   This license is effective until terminated. Your rights under this
+   license will terminate automatically without notice if you fail to
+   comply with any of its terms. Upon termination, you must cease all use
+   and destroy all copies of the Software.
+
+8. GAME COMPATIBILITY
+
+   Omnex is a tool for managing publicly available dedicated servers for
+   third-party games. All game names, logos, and trademarks are the
+   property of their respective owners. Omnex is not affiliated with,
+   endorsed, or sponsored by any game publisher.
