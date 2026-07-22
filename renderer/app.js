@@ -448,9 +448,8 @@ async function checkForUpdates() {
   try {
     const r = await window.nexus.checkForUpdates();
     if (r?.updateAvailable) {
-      if (confirm(`A new version (${r.latest}) is available.\nCurrent: ${r.current}\n\nOpen download page?`)) {
-        if (r.url) window.nexus.openExternal(r.url);
-      }
+      showUpdateBanner(r.latest, r.url);
+      showToast('🎉', `Version ${r.latest} is available — use the banner to download.`);
     } else if (r?.ok) {
       showToast('✅', `You are on the latest version (${r.current})`);
     } else {
@@ -2120,8 +2119,17 @@ async function refreshStorage(){
 }
 
 // ── Update banner ─────────────────────────────────────────────────────────────
+let __updateUrl = null;
+function showUpdateBanner(latest, url){
+  if (url) __updateUrl = url;
+  const b = document.getElementById('updateBanner');
+  const v = document.getElementById('updateVersion');
+  if (v) v.textContent = latest || '';
+  if (b) b.style.display = 'flex';
+}
 function openUpdate(){
-  const banner=document.getElementById('updateBanner'); if(banner) banner.style.display='none';
+  window.nexus.openExternal(__updateUrl || 'https://github.com/KOBRA1325/Omnex/releases/latest');
+  const banner = document.getElementById('updateBanner'); if (banner) banner.style.display = 'none';
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2177,7 +2185,7 @@ function wireEvents(){
   window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';}});
   window.nexus.onSettingsChanged(settings=>{appSettings=settings;applySettingsToUI();if(settings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=settings.consoleFontSize+'px';}});
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
-  window.nexus.onAppUpdate(({latest})=>{const b=document.getElementById('updateBanner');const v=document.getElementById('updateVersion');if(b)b.style.display='flex';if(v)v.textContent=latest;});
+  window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });
   try {
     window.nexus.onSteamQrCode(({ url }) => {
       showSteamQrCode(url);
