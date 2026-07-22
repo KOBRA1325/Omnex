@@ -2717,13 +2717,22 @@ ipcMain.handle('add-firewall-rule', async (e, { id, ports }) => {
 });
 
 
+// ── System stats (shared by get-stats and get-server-bundle) ──────────────────
+async function getStats() {
+  try {
+    const si = require('systeminformation');
+    const [cpu, mem] = await Promise.all([si.currentLoad(), si.mem()]);
+    return { systemCpu: Math.round(cpu.currentLoad), systemRam: Math.round((mem.used / mem.total) * 100), procCpu: 0, procMem: 0 };
+  } catch { return { systemCpu: 0, systemRam: 0, procCpu: 0, procMem: 0 }; }
+}
+
 // ── Batched server data IPC ───────────────────────────────────────────────────
 ipcMain.handle('get-server-bundle', async (e, id) => {
   const server = appData.servers.find(s => s.id === id);
   if (!server) return { ok: false };
 
   const [stats, backups, backupSettings, autoRestart] = await Promise.all([
-    refreshStats(),
+    getStats(),
     Promise.resolve(getBackupList(id)),
     Promise.resolve(server.backupSettings || { enabled: false, interval: 'daily', keepCount: 10 }),
     Promise.resolve(server.autoRestart   || { enabled: false, maxRetries: 3, cooldown: 10 }),
@@ -3862,13 +3871,7 @@ function killServer(id) {
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-ipcMain.handle('get-stats', async (e, id) => {
-  try {
-    const si = require('systeminformation');
-    const [cpu, mem] = await Promise.all([si.currentLoad(), si.mem()]);
-    return { systemCpu:Math.round(cpu.currentLoad), systemRam:Math.round((mem.used/mem.total)*100), procCpu:0, procMem:0 };
-  } catch { return { systemCpu:0, systemRam:0, procCpu:0, procMem:0 }; }
-});
+ipcMain.handle('get-stats', async (e, id) => getStats());
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
 setInterval(() => {
