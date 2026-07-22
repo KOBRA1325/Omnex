@@ -458,6 +458,32 @@ async function checkForUpdates() {
     }
   } catch(e) { showToast('❌', e.message); }
 }
+async function reportBug() {
+  let ver = '';
+  try { ver = await window.nexus.getAppVersion(); } catch(e) {}
+  const body = [
+    '**Describe the bug**',
+    '',
+    '',
+    '**Steps to reproduce**',
+    '1. ',
+    '2. ',
+    '',
+    '**What you expected to happen**',
+    '',
+    '',
+    '---',
+    `Omnex version: ${ver ? 'v' + ver : '(unknown)'}`,
+    'Windows version: ',
+    'Game / server type (if relevant): ',
+  ].join('\n');
+  const url = 'https://github.com/KOBRA1325/Omnex/issues/new'
+    + '?labels=bug'
+    + '&title=' + encodeURIComponent('[Bug] ')
+    + '&body='  + encodeURIComponent(body);
+  window.nexus.openExternal(url);
+  showToast('🐞', 'Opening bug report in your browser…');
+}
 function showTextModal(title, text) {
   const existing = document.getElementById('textInfoModal');
   if (existing) existing.remove();
