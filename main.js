@@ -380,7 +380,8 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   setupTray();
-  checkAppUpdate();
+  initAutoUpdater();
+  runStartupUpdateCheck();
   logSystemJavaInfo();
 });
 
@@ -426,16 +427,78 @@ function emit(ch, data)          { mainWindow?.webContents.send(ch, data); }
 function log(id, type, text)     { emit('console-line', { serverId:id, type, text, ts:new Date().toLocaleTimeString('en-US',{hour12:false}) }); }
 function setStatus(id, status)   { const s=appData.servers.find(s=>s.id===id); if(s){s.status=status; saveData(); emit('server-status',{serverId:id,status});} }
 
-// ── App self-update check ────────────────────────────────────────────────────
-async function checkAppUpdate() {
+// ── App self-update (electron-updater with GitHub-link fallback) ───────────────
+// autoUpdater downloads latest.yml + the NSIS installer from the GitHub release
+// and can install + relaunch in one click. It only works in a packaged build
+// whose release was published by electron-builder (so latest.yml exists) and
+// whose releases are publicly downloadable. When any of that isn't true we fall
+// back to the classic "open the GitHub releases page" flow.
+let autoUpdater = null;
+let updaterUsable = false;
+
+function initAutoUpdater() {
+  if (!app.isPackaged) return; // electron-updater is a no-op / throws in dev
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch(e) { autoUpdater = null; return; }
+
+  autoUpdater.autoDownload = false;           // wait for the user to click
+  autoUpdater.autoInstallOnAppQuit = true;    // if downloaded, finish on next quit
+  updaterUsable = true;
+
+  autoUpdater.on('checking-for-update', () => emit('update-status', { status: 'checking' }));
+  autoUpdater.on('update-available',   info => emit('update-status', { status: 'available',   version: info?.version }));
+  autoUpdater.on('update-not-available', info => emit('update-status', { status: 'none',      version: info?.version }));
+  autoUpdater.on('download-progress',  p    => emit('update-status', { status: 'downloading', percent: Math.round(p?.percent || 0) }));
+  autoUpdater.on('update-downloaded',  info => emit('update-status', { status: 'downloaded',  version: info?.version }));
+  autoUpdater.on('error',              err  => emit('update-status', { status: 'error', error: (err?.message || String(err)) }));
+}
+
+// Silent check on launch. If the updater is usable it drives the banner via
+// events; otherwise fall back to a plain GitHub API version comparison.
+async function runStartupUpdateCheck() {
+  if (updaterUsable) { try { await autoUpdater.checkForUpdates(); return; } catch(e) { /* fall through */ } }
+  await checkAppUpdateViaGitHub();
+}
+
+// Fallback path: compare versions against the latest GitHub release and, if
+// newer, tell the renderer to show the manual "download from GitHub" banner.
+async function checkAppUpdateViaGitHub() {
   try {
     const data = await fetchJSON('https://api.github.com/repos/KOBRA1325/omnex/releases/latest');
     const latest = data.tag_name?.replace('v','');
     if (latest && latest !== APP_VERSION) {
       emit('app-update-available', { current: APP_VERSION, latest, url: data.html_url });
     }
-  } catch(e) { /* no internet or repo not set up yet — silent */ }
+    return { ok: true, current: APP_VERSION, latest, updateAvailable: !!(latest && latest !== APP_VERSION), url: data.html_url };
+  } catch(e) { return { ok: false, current: APP_VERSION, error: e.message }; }
 }
+
+// Renderer-triggered check ("Check for updates" button). Returns the mode so the
+// renderer knows whether to expect event-driven auto-update or a manual banner.
+ipcMain.handle('updater-check', async () => {
+  if (updaterUsable) {
+    try { await autoUpdater.checkForUpdates(); return { mode: 'auto' }; }
+    catch(e) { return { mode: 'manual', ...(await checkAppUpdateViaGitHub()) }; }
+  }
+  return { mode: 'manual', ...(await checkAppUpdateViaGitHub()) };
+});
+
+ipcMain.handle('updater-download', async () => {
+  if (!updaterUsable) return { ok: false, error: 'Auto-update not available in this build' };
+  try { await autoUpdater.downloadUpdate(); return { ok: true }; }
+  catch(e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('updater-install', () => {
+  if (!updaterUsable) return { ok: false, error: 'Auto-update not available in this build' };
+  // Kill any running servers first so their processes don't block the installer,
+  // then quit and relaunch into the new version.
+  Object.keys(serverProcesses).forEach(killServer);
+  setTimeout(() => { try { autoUpdater.quitAndInstall(); } catch(e) {} }, 500);
+  return { ok: true };
+});
+
 ipcMain.on('open-release-page', (e, url) => shell.openExternal(url));
 
 ipcMain.on('tray-rebuild', () => { try { tray?.setContextMenu(buildTrayMenu()); } catch(e){} });

@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld('nexus', {
   openExternal:      (url)            => ipcRenderer.invoke('open-external', url),
   checkForUpdates:   ()               => ipcRenderer.invoke('check-for-updates'),
 
+  // App auto-updater (electron-updater)
+  updaterCheck:      ()               => ipcRenderer.invoke('updater-check'),
+  updaterDownload:   ()               => ipcRenderer.invoke('updater-download'),
+  updaterInstall:    ()               => ipcRenderer.invoke('updater-install'),
+  onUpdateStatus:    (cb)             => ipcRenderer.on('update-status', (_, d) => cb(d)),
+
   saveSchedule:   (s)  => ipcRenderer.invoke('save-schedule', s),
   toggleSchedule: (id) => ipcRenderer.invoke('toggle-schedule', id),
   deleteSchedule: (id) => ipcRenderer.invoke('delete-schedule', id),

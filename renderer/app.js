@@ -169,6 +169,7 @@ const GAMES = [
 // ── State ─────────────────────────────────────────────────────────────────────
 let servers   = [], schedules = [], activeId = null, uptimeSec = 0;
 let statsInterval = null, uptimeInterval = null, appSettings = {}, currentView = 'dashboard';
+let __manualUpdateCheck = false, appVersionStr = '';
 let selectedGame = GAMES[0], selectedMcType = 'vanilla', addModalMode = 'install';
 let importGameSel = GAMES[0], currentTheme = 'dark', _cachedBundle = null;
 let MAX_CONSOLE_LINES = 500, _consoleBuf = [], _consoleRaf = null;
@@ -445,17 +446,22 @@ async function openThirdPartyInfo() {
 }
 async function checkForUpdates() {
   showToast('⬆️', 'Checking for updates...');
+  __manualUpdateCheck = true;
   try {
-    const r = await window.nexus.checkForUpdates();
-    if (r?.updateAvailable) {
-      showUpdateBanner(r.latest, r.url);
-      showToast('🎉', `Version ${r.latest} is available — use the banner to download.`);
-    } else if (r?.ok) {
-      showToast('✅', `You are on the latest version (${r.current})`);
-    } else {
-      showToast('❌', r?.error || 'Update check failed');
+    const r = await window.nexus.updaterCheck();
+    // Auto mode: results arrive asynchronously via handleUpdateStatus events.
+    if (r?.mode === 'manual') {
+      __manualUpdateCheck = false;
+      if (r.updateAvailable) {
+        showUpdateBanner(r.latest, r.url);
+        showToast('🎉', `Version ${r.latest} is available — use the banner to download.`);
+      } else if (r.ok) {
+        showToast('✅', `You are on the latest version (${r.current})`);
+      } else {
+        showToast('❌', r.error || 'Update check failed');
+      }
     }
-  } catch(e) { showToast('❌', e.message); }
+  } catch(e) { __manualUpdateCheck = false; showToast('❌', e.message); }
 }
 async function reportBug() {
   let ver = '';
@@ -2150,17 +2156,94 @@ async function refreshStorage(){
 }
 
 // ── Update banner ─────────────────────────────────────────────────────────────
-let __updateUrl = null;
-function showUpdateBanner(latest, url){
-  if (url) __updateUrl = url;
-  const b = document.getElementById('updateBanner');
-  const v = document.getElementById('updateVersion');
-  if (v) v.textContent = latest || '';
-  if (b) b.style.display = 'flex';
+// mode: 'manual' → button opens the GitHub releases page.
+// mode: 'auto'   → electron-updater downloads + installs in-app.
+// state: 'available' | 'downloading' | 'downloaded'
+let updateFlow = { mode:'manual', state:'available', url:null, version:'', percent:0 };
+
+// Called by the main process's GitHub-API fallback (manual download path).
+function showUpdateBanner(version, url){
+  updateFlow = { mode:'manual', state:'available', url:url||null, version:version||'', percent:0 };
+  renderUpdateBanner();
 }
-function openUpdate(){
-  window.nexus.openExternal(__updateUrl || 'https://github.com/KOBRA1325/Omnex/releases/latest');
-  const banner = document.getElementById('updateBanner'); if (banner) banner.style.display = 'none';
+function renderUpdateBanner(){
+  const b   = document.getElementById('updateBanner');
+  const txt = document.getElementById('updateBannerText');
+  const btn = document.getElementById('updateActionBtn');
+  if (!b) return;
+  const vLabel = updateFlow.version ? `v${updateFlow.version}` : 'A new version';
+  if (updateFlow.state === 'downloading'){
+    if (txt) txt.innerHTML = `⬇️ Downloading ${escapeHtml(vLabel)}… <b>${updateFlow.percent||0}%</b>`;
+    if (btn) btn.style.display = 'none';
+  } else if (updateFlow.state === 'downloaded'){
+    if (txt) txt.innerHTML = `✅ ${escapeHtml(vLabel)} downloaded — restart to finish installing.`;
+    if (btn){ btn.style.display=''; btn.disabled=false; btn.textContent='Restart & Install'; }
+  } else { // available
+    if (txt) txt.innerHTML = `🎉 Omnex <b>${escapeHtml(updateFlow.version||'')}</b> is available!`;
+    if (btn){ btn.style.display=''; btn.disabled=false; btn.textContent = updateFlow.mode==='auto' ? 'Download & Install' : 'Download Update'; }
+  }
+  b.style.display = 'flex';
+}
+function dismissUpdateBanner(){
+  const b = document.getElementById('updateBanner'); if (b) b.style.display='none';
+}
+function runningServerCount(){
+  try { return servers.filter(s => s.status === 'online').length; } catch(e){ return 0; }
+}
+async function onUpdateAction(){
+  // Manual mode: hand off to the browser.
+  if (updateFlow.mode === 'manual'){
+    window.nexus.openExternal(updateFlow.url || 'https://github.com/KOBRA1325/Omnex/releases/latest');
+    dismissUpdateBanner();
+    return;
+  }
+  // Auto mode, ready to install.
+  if (updateFlow.state === 'downloaded'){
+    const n = runningServerCount();
+    if (n > 0 && !confirm(`Installing will stop ${n} running server${n>1?'s':''} and restart Omnex. Continue?`)) return;
+    await window.nexus.updaterInstall();
+    return;
+  }
+  // Auto mode, start the download.
+  const btn = document.getElementById('updateActionBtn');
+  if (btn){ btn.disabled = true; btn.textContent = 'Starting…'; }
+  const r = await window.nexus.updaterDownload();
+  if (!r || r.ok === false){
+    showToast('❌', (r && r.error) || 'Download failed — opening GitHub instead.');
+    updateFlow.mode = 'manual';
+    renderUpdateBanner();
+  }
+}
+// Event-driven updates from electron-updater in the main process.
+function handleUpdateStatus(d){
+  if (!d) return;
+  switch(d.status){
+    case 'available':
+      updateFlow = { mode:'auto', state:'available', url:null, version:d.version||'', percent:0 };
+      renderUpdateBanner();
+      break;
+    case 'downloading':
+      updateFlow.mode = 'auto'; updateFlow.state = 'downloading'; updateFlow.percent = d.percent||0;
+      renderUpdateBanner();
+      break;
+    case 'downloaded':
+      updateFlow.mode = 'auto'; updateFlow.state = 'downloaded'; if (d.version) updateFlow.version = d.version;
+      renderUpdateBanner();
+      showToast('✅', `Update ${updateFlow.version?('v'+updateFlow.version):''} ready to install`);
+      break;
+    case 'none':
+      if (__manualUpdateCheck){ showToast('✅', `You are on the latest version (v${appVersionStr||d.version||''})`); }
+      break;
+    case 'error':
+      // Auto path failed (e.g. no latest.yml / private release) — fall back to GitHub.
+      if (__manualUpdateCheck){ showToast('⚠️', 'Auto-update unavailable — checking GitHub…'); }
+      window.nexus.checkForUpdates().then(r => {
+        if (r?.updateAvailable) showUpdateBanner(r.latest, r.url);
+        else if (__manualUpdateCheck && r?.ok) showToast('✅', `You are on the latest version (v${r.current})`);
+      }).catch(()=>{});
+      break;
+  }
+  __manualUpdateCheck = false;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2177,6 +2260,7 @@ async function init(){
   applySettingsToUI();
   if(appSettings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=appSettings.consoleFontSize+'px';}
   if(appSettings.maxConsoleLines) MAX_CONSOLE_LINES=appSettings.maxConsoleLines;
+  try{appVersionStr=await window.nexus.getAppVersion();}catch(e){}
   servers=await window.nexus.getServers();
   schedules=await window.nexus.getSchedules();
   servers=servers.map(s=>({...s,status:['installing','updating','starting'].includes(s.status)?'offline':s.status}));
@@ -2190,7 +2274,7 @@ async function init(){
   appendLog('dim','Omnex ready. Select or add a server to begin.');
 }
 function wireEvents(){
-  ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
+  ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
   window.nexus.onServerStatus(({serverId,status})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status=status;if(serverId===activeId)renderHeader();renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='offline';if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
@@ -2217,6 +2301,7 @@ function wireEvents(){
   window.nexus.onSettingsChanged(settings=>{appSettings=settings;applySettingsToUI();if(settings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=settings.consoleFontSize+'px';}});
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
   window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });
+  window.nexus.onUpdateStatus(d=>handleUpdateStatus(d));
   try {
     window.nexus.onSteamQrCode(({ url }) => {
       showSteamQrCode(url);

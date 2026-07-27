@@ -22,9 +22,10 @@
     "release": "electron-builder --win nsis --publish always"
   },
   "dependencies": {
-    "systeminformation": "^5.22.0",
+    "electron-updater": "^6.8.9",
     "steam-session": "^1.9.2",
-    "steam-totp": "^2.1.2"
+    "steam-totp": "^2.1.2",
+    "systeminformation": "^5.22.0"
   },
   "devDependencies": {
     "electron": "^29.0.0",
@@ -33,13 +34,13 @@
   "build": {
     "appId": "com.layerline.omnex",
     "productName": "Omnex",
-    "copyright": "Copyright \u00a9 2025 Layerline Printing",
+    "copyright": "Copyright © 2025 Layerline Printing",
     "publish": [
       {
         "provider": "github",
         "owner": "KOBRA1325",
         "repo": "omnex",
-        "private": true,
+        "private": false,
         "releaseType": "release"
       }
     ],
@@ -58,14 +59,22 @@
       "THIRD_PARTY_NOTICES.md"
     ],
     "extraResources": [
-      { "from": "LICENSE", "to": "LICENSE" },
-      { "from": "THIRD_PARTY_NOTICES.md", "to": "THIRD_PARTY_NOTICES.md" }
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico",
@@ -87,7 +96,9 @@
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true,
       "license": "LICENSE",
-      "installerLanguages": ["en_US"],
+      "installerLanguages": [
+        "en_US"
+      ],
       "language": "1033"
     }
   }

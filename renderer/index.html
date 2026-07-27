@@ -37,9 +37,9 @@
 
 <!-- APP UPDATE BANNER -->
 <div class="update-banner" id="updateBanner" style="display:none">
-  <span>🎉 Omnex <b id="updateVersion"></b> is available!</span>
-  <button onclick="openUpdate()">Download Update</button>
-  <button class="dismiss" onclick="document.getElementById('updateBanner').style.display='none'">✕</button>
+  <span id="updateBannerText">🎉 Omnex <b id="updateVersion"></b> is available!</span>
+  <button id="updateActionBtn" onclick="onUpdateAction()">Download &amp; Install</button>
+  <button class="dismiss" onclick="dismissUpdateBanner()">✕</button>
 </div>
 
 <!-- WELCOME SCREEN - fixed overlay, outside layout so drag region can't block it -->
