@@ -105,9 +105,10 @@ contextBridge.exposeInMainWorld('nexus', {
   getRemoteStatus:   ()     => ipcRenderer.invoke('get-remote-status'),
 
   // Settings
-  getSettings:       ()         => ipcRenderer.invoke('get-settings'),
-  saveSettings:      (settings) => ipcRenderer.invoke('save-settings', settings),
-  onSettingsChanged: (cb)       => ipcRenderer.on('settings-changed', (_, d) => cb(d)),
+  getSettings:        ()         => ipcRenderer.invoke('get-settings'),
+  saveSettings:       (settings) => ipcRenderer.invoke('save-settings', settings),
+  onSettingsChanged:  (cb)       => ipcRenderer.on('settings-changed', (_, d) => cb(d)),
+  testDiscordWebhook: (url)      => ipcRenderer.invoke('test-discord-webhook', url),
 
   // Log browser
   getLogFiles:       (id)       => ipcRenderer.invoke('get-log-files', id),

@@ -334,6 +334,11 @@
       <label class="form-label">Time (24h)</label>
       <input type="time" class="form-input" id="schedTime" value="03:00" style="pointer-events:all;">
     </div>
+    <div class="form-row" id="schedWarnOptions">
+      <label class="form-label">Warn players before</label>
+      <input type="text" class="form-input" id="schedWarnMinutes" value="15, 5, 1" placeholder="e.g. 15, 5, 1" style="pointer-events:all;">
+      <div class="form-hint" style="margin-top:6px">Minutes before the action to announce a warning, comma-separated. In-game chat shows on Minecraft &amp; Terraria; other games get a Discord + console warning. Leave blank for no warning.</div>
+    </div>
     <div class="form-row" id="schedBackupOptions" style="display:none">
       <label class="form-label">Keep Last</label>
       <select class="form-select" id="schedBackupKeep" style="pointer-events:all;">
@@ -569,6 +574,26 @@
         </div>
         <div class="settings-row">
           <div class="settings-row-info">
+            <div class="settings-row-label">Notify on Start</div>
+            <div class="settings-row-desc">Alert when a server finishes starting</div>
+          </div>
+          <button class="cfg-bool-btn" id="setNotifyOnStart" onclick="toggleSetting('notifyOnStart', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Notify on Stop</div>
+            <div class="settings-row-desc">Alert when a server shuts down cleanly</div>
+          </div>
+          <button class="cfg-bool-btn" id="setNotifyOnStop" onclick="toggleSetting('notifyOnStop', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
             <div class="settings-row-label">Notify on Backup</div>
             <div class="settings-row-desc">Alert when an automatic backup completes</div>
           </div>
@@ -586,6 +611,32 @@
             <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
             <span class="cfg-bool-val">OFF</span>
           </button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <div class="config-group-label">💬 Discord</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Send events to Discord</div>
+            <div class="settings-row-desc">Post the enabled events above to a Discord channel via webhook</div>
+          </div>
+          <button class="cfg-bool-btn" id="setDiscordEnabled" onclick="toggleSetting('discordEnabled', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row" style="flex-direction:column; align-items:stretch; gap:8px">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Webhook URL</div>
+            <div class="settings-row-desc">In Discord: Channel → Edit → Integrations → Webhooks → New Webhook → Copy URL</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center">
+            <input type="text" class="form-input" id="setDiscordWebhookUrl" placeholder="https://discord.com/api/webhooks/..."
+                   style="flex:1; pointer-events:all;" onchange="saveWebhookUrl(this.value)">
+            <button class="btn-modal-cancel" style="white-space:nowrap; pointer-events:all;" onclick="testDiscordWebhook(this)">🔔 Test</button>
+          </div>
+          <div id="discordTestResult" class="form-hint" style="display:none"></div>
         </div>
       </div>
 

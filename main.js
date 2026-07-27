@@ -2053,6 +2053,16 @@ async function createBackup(serverId, label = 'Manual backup', trigger = 'manual
 
   const size = getDirSize(backupDir);
   log(serverId, 'success', `✔ Backup complete: ${label} (${formatBytesNative(size)})`);
+  if (trigger !== 'manual') {
+    notify('backup', {
+      title: `💾 Backup complete — ${server.name}`,
+      body: `${label} (${formatBytesNative(size)})`,
+      fields: [
+        { name: 'Server', value: server.name, inline: true },
+        { name: 'Size', value: formatBytesNative(size), inline: true },
+      ],
+    });
+  }
   return { id: backupId, size, label };
 }
 
@@ -2350,8 +2360,12 @@ function loadSettings() {
     minimizeToTray:      false,
     notifications:       true,
     notifyOnCrash:       true,
+    notifyOnStart:       false,
+    notifyOnStop:        false,
     notifyOnBackup:      true,
     notifyOnPlayerJoin:  false,
+    discordEnabled:      false,
+    discordWebhookUrl:   '',
     maxConsoleLines:     500,
     defaultBackupKeep:   10,
     autoStartServers:    [],
@@ -2392,6 +2406,70 @@ function sendNotification(title, body, urgency = 'normal') {
     }
   } catch(e) {}
 }
+
+// Post a rich embed to a Discord webhook. Resolves { ok, error } and never throws.
+function postDiscordWebhook(webhookUrl, { title, description, color, fields }) {
+  return new Promise(resolve => {
+    if (!webhookUrl || !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//i.test(webhookUrl.trim())) {
+      return resolve({ ok: false, error: 'Invalid Discord webhook URL' });
+    }
+    let payload;
+    try {
+      const embed = { title, description, color: typeof color === 'number' ? color : 0x5865F2, timestamp: new Date().toISOString(), footer: { text: 'Omnex' } };
+      if (Array.isArray(fields) && fields.length) embed.fields = fields;
+      payload = JSON.stringify({ username: 'Omnex', embeds: [embed] });
+    } catch(e) { return resolve({ ok: false, error: 'Failed to build payload' }); }
+
+    let u;
+    try { u = new URL(webhookUrl.trim()); } catch(e) { return resolve({ ok: false, error: 'Invalid webhook URL' }); }
+    const opts = {
+      method: 'POST',
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), 'User-Agent': 'Omnex/1.0' },
+    };
+    const req = https.request(opts, res => {
+      res.resume(); // drain
+      if (res.statusCode >= 200 && res.statusCode < 300) resolve({ ok: true });
+      else resolve({ ok: false, error: `Discord returned HTTP ${res.statusCode}` });
+    });
+    req.on('error', err => resolve({ ok: false, error: err.message }));
+    req.write(payload);
+    req.end();
+  });
+}
+
+// Discord embed colors per event type.
+const NOTIFY_COLORS = { crash: 0xED4245, start: 0x57F287, stop: 0x99AAB5, backup: 0x5865F2, playerJoin: 0x57F287, playerLeave: 0xFAA61A };
+
+// Unified notification dispatcher. Fires a Windows toast (respecting `notifications`
+// + the per-event toggle) AND a Discord webhook (respecting `discordEnabled` + the
+// same per-event toggle). `event` is one of crash|start|stop|backup|playerJoin|playerLeave.
+function notify(event, { title, body, fields, urgency = 'normal' }) {
+  const toggleKey = {
+    crash: 'notifyOnCrash', start: 'notifyOnStart', stop: 'notifyOnStop',
+    backup: 'notifyOnBackup', playerJoin: 'notifyOnPlayerJoin', playerLeave: 'notifyOnPlayerJoin',
+  }[event];
+  const enabled = toggleKey ? appSettings[toggleKey] : true;
+  if (!enabled) return;
+
+  sendNotification(title, body, urgency);
+
+  if (appSettings.discordEnabled && appSettings.discordWebhookUrl) {
+    postDiscordWebhook(appSettings.discordWebhookUrl, {
+      title, description: body, color: NOTIFY_COLORS[event], fields,
+    }).catch(() => {});
+  }
+}
+
+ipcMain.handle('test-discord-webhook', async (e, url) => {
+  const webhook = (url && url.trim()) || appSettings.discordWebhookUrl;
+  return postDiscordWebhook(webhook, {
+    title: '✅ Omnex connected',
+    description: 'This is a test message. Your Discord webhook is working — Omnex will post server events here.',
+    color: NOTIFY_COLORS.start,
+  });
+});
 
 
 // ── Server Templates ──────────────────────────────────────────────────────────
@@ -3752,6 +3830,15 @@ async function startServerById(id) {
     const proc = spawn(exe, args, { cwd:server.installDir, shell: !!server.useShell, windowsHide: true });
     serverProcesses[id] = proc;
     log(id, 'success', `✔ Process spawned (PID: ${proc.pid})`);
+    notify('start', {
+      title: `▶ ${server.name} started`,
+      body: `${server.name} is now running.`,
+      fields: [
+        { name: 'Server', value: server.name, inline: true },
+        { name: 'Game', value: server.game || 'Unknown', inline: true },
+        { name: 'Port', value: String(server.port || '—'), inline: true },
+      ],
+    });
 
     // Some games (Palworld, Ark, other Unreal titles) don't emit useful stdout — they log to files.
     // Tail those log files so their output shows up in the Live Console.
@@ -3794,6 +3881,26 @@ async function startServerById(id) {
           log(id, 'warn', `Server ran for ${formatBytesNative(uptime).replace(' B','')}s then exited with code ${code}.`);
         }
         emit('server-crashed', { serverId:id, code, uptime, isCrash });
+        notify('crash', {
+          title: `⚠ ${server.name} crashed`,
+          body: `${server.name} stopped unexpectedly after ${uptime}s (exit code ${code}).`,
+          urgency: 'critical',
+          fields: [
+            { name: 'Server', value: server.name, inline: true },
+            { name: 'Game', value: server.game || 'Unknown', inline: true },
+            { name: 'Exit code', value: String(code), inline: true },
+          ],
+        });
+      } else {
+        // Clean or intentional shutdown
+        notify('stop', {
+          title: `⏹ ${server.name} stopped`,
+          body: `${server.name} has shut down.`,
+          fields: [
+            { name: 'Server', value: server.name, inline: true },
+            { name: 'Game', value: server.game || 'Unknown', inline: true },
+          ],
+        });
       }
       // Clear player list on stop
       const stoppedSrv = appData.servers.find(s => s.id === id);
@@ -3874,14 +3981,78 @@ function killServer(id) {
 ipcMain.handle('get-stats', async (e, id) => getStats());
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
+
+// Games whose dedicated servers read commands from stdin, so we can push an
+// in-game chat broadcast. Others (most Unreal/Steam titles) don't, and the
+// warning falls back to the Live Console + Discord only.
+function serverAcceptsConsoleChat(server) {
+  const def = GAME_DEFS[server?.game];
+  return !!(def?.type === 'minecraft' || def?.useJava || server?.game === 'Terraria');
+}
+
+// Broadcast a restart/shutdown warning: always to the Live Console, in-game chat
+// where the engine supports it, and Discord when configured.
+function broadcastWarning(serverId, message) {
+  const server = appData.servers.find(s => s.id === serverId);
+  const proc = serverProcesses[serverId];
+  log(serverId, 'warn', `[Broadcast] ${message}`);
+  if (proc && serverAcceptsConsoleChat(server)) {
+    try { proc.stdin.write(`say ${message}\n`); } catch(e) {}
+  }
+  if (appSettings.discordEnabled && appSettings.discordWebhookUrl) {
+    postDiscordWebhook(appSettings.discordWebhookUrl, {
+      title: `⏳ ${server?.name || 'Server'}`,
+      description: message,
+      color: NOTIFY_COLORS.playerLeave,
+    }).catch(() => {});
+  }
+}
+
+// Track servers mid-countdown so a minute-tick can't start a second sequence.
+const pendingShutdowns = new Set();
+
+// Run a scheduled stop/restart, optionally preceded by timed in-game warnings.
+// warnMinutes is an array like [15,5,1] — minutes-before-action to announce.
+function runScheduledShutdown(serverId, action, warnMinutes) {
+  if (pendingShutdowns.has(serverId)) return;
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server) return;
+  const verb = action === 'restart' ? 'restart' : 'shut down';
+
+  const doAction = async () => {
+    pendingShutdowns.delete(serverId);
+    if (action === 'restart') { await killServer(serverId); setTimeout(() => startServerById(serverId), 3000); }
+    else await killServer(serverId);
+  };
+
+  // Sanitize: positive whole minutes, unique, largest first.
+  const warns = [...new Set((warnMinutes || []).map(n => parseInt(n, 10)).filter(n => Number.isFinite(n) && n > 0))].sort((a, b) => b - a);
+
+  // No warnings, or server isn't running → act right away.
+  if (!serverProcesses[serverId] || !warns.length) return void doAction();
+
+  pendingShutdowns.add(serverId);
+  const lead = warns[0];
+  warns.forEach(m => {
+    setTimeout(() => {
+      if (!serverProcesses[serverId]) { pendingShutdowns.delete(serverId); return; } // gone already
+      broadcastWarning(serverId, `Server will ${verb} in ${m} ${m === 1 ? 'minute' : 'minutes'}!`);
+    }, (lead - m) * 60000);
+  });
+  setTimeout(() => {
+    if (!serverProcesses[serverId]) { pendingShutdowns.delete(serverId); return; }
+    broadcastWarning(serverId, `Server is ${action === 'restart' ? 'restarting' : 'shutting down'} now!`);
+    setTimeout(doAction, 3000);
+  }, lead * 60000);
+}
+
 setInterval(() => {
   const now=new Date(), hhmm=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
   appData.schedules.filter(s=>s.active).forEach(async sched => {
     let run = (sched.freq==='Daily'&&sched.time===hhmm)||(sched.freq==='Hourly'&&now.getMinutes()===0);
     if (!run||!sched.serverId) return;
     log(sched.serverId,'warn',`[Scheduler] ${sched.label}`);
-    if (sched.action==='restart') { await killServer(sched.serverId); setTimeout(()=>ipcMain.emit('start-server',null,sched.serverId),3000); }
-    else if (sched.action==='stop') await killServer(sched.serverId);
+    if (sched.action==='restart' || sched.action==='stop') runScheduledShutdown(sched.serverId, sched.action, sched.warnMinutes);
   });
 }, 60000);
 
@@ -3922,7 +4093,13 @@ function parsePlayerEvent(serverId, line) {
                     line.match(/INFO\]: ([A-Za-z0-9_]+) joined the game/i);
   if (joinMatch) {
     const name = joinMatch[1];
-    if (!server.players.includes(name)) server.players.push(name);
+    if (!server.players.includes(name)) {
+      server.players.push(name);
+      notify('playerJoin', {
+        title: `➕ ${name} joined ${server.name}`,
+        body: `${name} joined the game. ${server.players.length} online.`,
+      });
+    }
     emit('players-updated', { serverId, players: server.players });
     return;
   }
@@ -3931,7 +4108,15 @@ function parsePlayerEvent(serverId, line) {
   const leaveMatch = line.match(/^([A-Za-z0-9_]+) left the game/i) ||
                      line.match(/INFO\]: ([A-Za-z0-9_]+) left the game/i);
   if (leaveMatch) {
-    server.players = server.players.filter(p => p !== leaveMatch[1]);
+    const name = leaveMatch[1];
+    const wasOnline = server.players.includes(name);
+    server.players = server.players.filter(p => p !== name);
+    if (wasOnline) {
+      notify('playerLeave', {
+        title: `➖ ${name} left ${server.name}`,
+        body: `${name} left the game. ${server.players.length} online.`,
+      });
+    }
     emit('players-updated', { serverId, players: server.players });
     return;
   }
