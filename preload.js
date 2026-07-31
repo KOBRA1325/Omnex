@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld('nexus', {
   // Server import
   importServer: (config) => ipcRenderer.invoke('import-server', config),
   browseFolder: ()       => ipcRenderer.invoke('browse-folder'),
+  detectServer: (dir)    => ipcRenderer.invoke('detect-server', dir),
 
   // Templates
   getTemplates:    ()                  => ipcRenderer.invoke('get-templates'),

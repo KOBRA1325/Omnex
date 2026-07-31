@@ -171,7 +171,7 @@ let servers   = [], schedules = [], activeId = null, uptimeSec = 0;
 let statsInterval = null, uptimeInterval = null, appSettings = {}, currentView = 'dashboard';
 let __manualUpdateCheck = false, appVersionStr = '';
 let selectedGame = GAMES[0], selectedMcType = 'vanilla', addModalMode = 'install';
-let importGameSel = GAMES[0], currentTheme = 'dark', _cachedBundle = null;
+let importDetectedGame = null, currentTheme = 'dark', _cachedBundle = null;
 let MAX_CONSOLE_LINES = 500, _consoleBuf = [], _consoleRaf = null;
 const chartData = { cpu: new Array(60).fill(0), ram: new Array(60).fill(0) };
 let workshopSelectedMods = [], workshopServerId = null;
@@ -941,6 +941,10 @@ function openAddModal() {
   if (!nameInput || !portInput) { showModal('addModal'); return; }
   nameInput.disabled = false; nameInput.style.opacity='1'; nameInput.style.pointerEvents='auto';
   nameInput.value = ''; portInput.value = GAMES[0].port;
+  // Reset the Import tab to a clean slate each time the modal opens.
+  importDetectedGame = null;
+  ['importPath','importName','importPort'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  const dh=document.getElementById('importDetectHint'); if(dh) dh.style.display='none';
   updateInstallInfo(); updateInstallBtn(); updateMcVisibility();
   showModal('addModal');
   setTimeout(() => { nameInput.focus(); }, 150);
@@ -1024,40 +1028,47 @@ function switchAddTab(mode) {
   const ip = document.getElementById('installPanel'), ep = document.getElementById('importPanel');
   if(ip) ip.style.display = mode==='install'?'':'none';
   if(ep) ep.style.display = mode==='import'?'':'none';
+  // The "Select Game" grid belongs to Install only — Import auto-detects the game.
+  const sg = document.getElementById('selectGameRow');
+  if(sg) sg.style.display = mode==='install'?'':'none';
   const ti = document.getElementById('tabInstall'), te = document.getElementById('tabImport');
   if(ti) ti.classList.toggle('active', mode==='install');
   if(te) te.classList.toggle('active', mode==='import');
   updateInstallBtn();
-  if(mode==='import') renderImportGameGrid();
-}
-function renderImportGameGrid() {
-  const grid = document.getElementById('importGameGridInner'); if(!grid) return;
-  grid.innerHTML = GAMES.map((g,i) => `
-    <div class="game-option ${g.name===importGameSel.name?'selected':''}" onclick="pickImportGame(${i})">
-      <div class="game-img-wrap">${g.icon ? `<img src="${g.icon}" alt="${g.name}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : `<span style="display:flex; align-items:center; justify-content:center; height:100%; font-size:32px">${g.fallback||'🎮'}</span>`}
-        <span class="game-fallback" style="display:none">${g.fallback}</span></div>
-      <span class="name">${g.name}</span>
-    </div>`).join('');
-}
-function pickImportGame(i) {
-  importGameSel = GAMES[i];
-  const p = document.getElementById('importPort'); if(p) p.value = importGameSel.port;
-  renderImportGameGrid();
+  if(mode==='import'){ const h=document.getElementById('importDetectHint'); if(h) h.style.display='none'; }
 }
 async function browseImportFolder() {
   const folder = await window.nexus.browseFolder(); if(!folder) return;
   const p = document.getElementById('importPath'); if(p) p.value = folder;
   const name = document.getElementById('importName');
   if(name && !name.value) name.value = folder.split(/[\\/]/).pop();
+  // Auto-detect the game and port from the folder contents.
+  const hint = document.getElementById('importDetectHint');
+  const setHint = (text, ok) => { if(hint){ hint.textContent=text; hint.style.color=ok?'var(--green)':'var(--red)'; hint.style.display='block'; } };
+  importDetectedGame = null;
+  try {
+    const d = await window.nexus.detectServer(folder);
+    if (d && d.ok && d.game) {
+      importDetectedGame = GAMES.find(x => x.name === d.game) || { name:d.game, port:d.port||'', icon:'', fallback:'🎮' };
+      const portEl = document.getElementById('importPort');
+      if (portEl) portEl.value = d.port || importDetectedGame.port || '';
+      setHint(`✓ Detected ${d.game}${d.port ? ' · port ' + d.port : ''}`, true);
+    } else {
+      setHint("Couldn't recognize a game in that folder. Make sure it's a server folder containing the server's files.", false);
+    }
+  } catch(e) {
+    setHint('Detection failed: ' + e.message, false);
+  }
 }
 async function doImportServer() {
   const importPath = document.getElementById('importPath')?.value.trim();
-  const name = document.getElementById('importName')?.value.trim() || `${importGameSel.name} Server`;
-  const port = document.getElementById('importPort')?.value.trim() || importGameSel.port;
   if (!importPath) { showToast('⚠️','Select a server folder first'); return; }
+  if (!importDetectedGame) { showToast('⚠️',"Couldn't detect the game — pick a folder that contains the server files"); return; }
+  const name = document.getElementById('importName')?.value.trim() || `${importDetectedGame.name} Server`;
+  const port = document.getElementById('importPort')?.value.trim() || importDetectedGame.port;
   const btn = document.getElementById('btnInstall'); if(btn){btn.disabled=true;btn.textContent='Importing...';}
   closeAddModal();
-  const result = await window.nexus.importServer({ name, port, game:importGameSel.name, icon:importGameSel.icon, fallback:importGameSel.fallback, importDir:importPath });
+  const result = await window.nexus.importServer({ name, port, game:importDetectedGame.name, icon:importDetectedGame.icon, fallback:importDetectedGame.fallback, importDir:importPath });
   if(btn){btn.disabled=false;btn.textContent='📂 Import Server';}
   if (result.ok) {
     servers.push({...result.server, status:'offline'});

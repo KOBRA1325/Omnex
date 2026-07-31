@@ -2943,6 +2943,59 @@ ipcMain.handle('browse-folder', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+// Default listen ports per game — used when we can't read the real one from a config file.
+const GAME_DEFAULT_PORTS = {
+  'Minecraft':'25565', 'CS2':'27015', 'Valheim':'2456', 'Rust':'28015', 'Satisfactory':'15777',
+  'Project Zomboid':'16261', 'Ark: Survival':'7777', 'V Rising':'9876', 'Terraria':'7777',
+  '7 Days to Die':'26900', 'Palworld':'8211', 'Enshrouded':'15636',
+};
+
+// Best-effort: read the actual configured port out of a known server config file.
+// Returns a string port, or null if we couldn't find one.
+function detectServerPort(dir, game) {
+  const readIf = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch(e) { return null; } };
+  try {
+    if (game === 'Minecraft') {
+      const m = (readIf(path.join(dir, 'server.properties')) || '').match(/^\s*server-port\s*=\s*(\d+)/m);
+      if (m) return m[1];
+    } else if (game === '7 Days to Die') {
+      const m = (readIf(path.join(dir, 'serverconfig.xml')) || '').match(/name="ServerPort"\s+value="(\d+)"/i);
+      if (m) return m[1];
+    } else if (game === 'Terraria') {
+      const m = (readIf(path.join(dir, 'serverconfig.txt')) || '').match(/^\s*port\s*=\s*(\d+)/m);
+      if (m) return m[1];
+    } else if (game === 'Enshrouded') {
+      const m = (readIf(path.join(dir, 'enshrouded_server.json')) || '').match(/"gamePort"\s*:\s*(\d+)/);
+      if (m) return m[1];
+    } else if (game === 'V Rising') {
+      for (const c of [path.join(dir, 'save-data', 'Settings', 'ServerHostSettings.json'), path.join(dir, 'Settings', 'ServerHostSettings.json')]) {
+        const m = (readIf(c) || '').match(/"Port"\s*:\s*(\d+)/);
+        if (m) return m[1];
+      }
+    }
+  } catch(e) {}
+  return null;
+}
+
+// Scan an existing server folder and figure out which game it is (+ its port),
+// so the Import flow doesn't have to ask the user to pick a game.
+ipcMain.handle('detect-server', async (e, dir) => {
+  if (!dir || !fs.existsSync(dir)) return { ok: false, error: 'Folder not found' };
+  let game = null;
+  // server.properties is a reliable Minecraft signal across vanilla/paper/fabric/forge.
+  if (fs.existsSync(path.join(dir, 'server.properties'))) game = 'Minecraft';
+  // Otherwise, match by the game's known server executable.
+  if (!game) {
+    for (const [name, def] of Object.entries(GAME_DEFS)) {
+      if (name === 'Minecraft' || !def.startExe) continue;
+      if (findExe(dir, def.startExe)) { game = name; break; }
+    }
+  }
+  if (!game) return { ok: true, game: null };
+  const port = detectServerPort(dir, game) || GAME_DEFAULT_PORTS[game] || '';
+  return { ok: true, game, port, name: path.basename(dir) };
+});
+
 
 // ── Arma 3 / Workshop mod support ────────────────────────────────────────────
 const STEAM_CREDS_FILE = path.join(USER_DATA, 'steam_creds.json');

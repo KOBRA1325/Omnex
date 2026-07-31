@@ -367,7 +367,7 @@
         <button class="modal-tab" id="tabImport" onclick="switchAddTab('import')">Import Existing</button>
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row" id="selectGameRow">
       <label class="form-label">Select Game</label>
       <div class="game-grid-wrap">
         <div class="game-grid" id="gameGrid"></div>
@@ -381,13 +381,8 @@
           <input type="text" class="form-input" id="importPath" placeholder="C:\servers\my-minecraft-server" readonly style="pointer-events:all;">
           <button class="btn-browse" onclick="browseImportFolder()">Browse…</button>
         </div>
-        <div class="form-hint">Point to an existing server folder you already have set up</div>
-      </div>
-      <div class="form-row">
-        <label class="form-label">Game</label>
-        <div class="game-grid-wrap" id="importGameGrid">
-          <div class="game-grid" id="importGameGridInner"></div>
-        </div>
+        <div class="form-hint">Point to an existing server folder — Omnex detects the game and port automatically</div>
+        <div class="form-hint" id="importDetectHint" style="display:none; margin-top:6px"></div>
       </div>
       <div class="form-row">
         <label class="form-label">Server Name</label>
