@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 let steamAuth;
 try { steamAuth = require('./steam-auth'); } catch(e) { console.warn('Steam auth library not available'); }
 const path   = require('path');
