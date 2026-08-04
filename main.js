@@ -516,7 +516,18 @@ ipcMain.handle('get-app-version', () => APP_VERSION);
 ipcMain.handle('remove-server', async (e, id) => {
   if (serverProcesses[id]) await killServer(id);
   const srv = appData.servers.find(s=>s.id===id);
-  if (srv?.installDir && fs.existsSync(srv.installDir)) fs.rmSync(srv.installDir, {recursive:true,force:true});
+  if (srv) {
+    // SAFETY: only ever delete folders Omnex itself created, inside its own
+    // SERVERS_DIR. NEVER delete an imported server's folder — that points at the
+    // user's own existing data that Omnex did not create, so removing an imported
+    // server must only un-list it and leave every file on disk untouched.
+    const dir = srv.installDir ? path.resolve(srv.installDir) : '';
+    const serversRoot = path.resolve(SERVERS_DIR);
+    const insideServersDir = dir && (dir === serversRoot || dir.startsWith(serversRoot + path.sep));
+    if (!srv.imported && insideServersDir && fs.existsSync(dir)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch(e) {}
+    }
+  }
   appData.servers = appData.servers.filter(s=>s.id!==id);
   saveData(); return true;
 });

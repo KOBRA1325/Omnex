@@ -679,7 +679,10 @@ async function ctxRemoveServer(id) {
   hideServerContextMenu();
   const s = servers.find(sv => sv.id === id);
   if (!s) return;
-  if (!confirm(`Remove "${s.name}"? This will not delete the install files.`)) return;
+  const msg = s.imported
+    ? `Remove "${s.name}" from Omnex?\n\nYour original server folder and files will NOT be deleted — this only removes it from the list.`
+    : `Remove "${s.name}"?\n\nThis permanently deletes its installed server files and cannot be undone.`;
+  if (!confirm(msg)) return;
   try {
     await window.nexus.removeServer(id);
     servers = servers.filter(sv => sv.id !== id);
@@ -915,7 +918,10 @@ async function sendCommand() {
 }
 async function removeCurrentServer() {
   const s = getActive(); if (!s) return;
-  if (!confirm(`Remove "${s.name}"? This cannot be undone.`)) return;
+  const msg = s.imported
+    ? `Remove "${s.name}" from Omnex?\n\nYour original server folder and files will NOT be deleted — this only removes it from the list.`
+    : `Remove "${s.name}"?\n\nThis permanently deletes its installed server files and cannot be undone.`;
+  if (!confirm(msg)) return;
   const removedName = s.name;
   clearInterval(statsInterval); clearInterval(uptimeInterval);
   await window.nexus.removeServer(s.id);
