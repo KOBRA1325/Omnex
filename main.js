@@ -517,14 +517,14 @@ ipcMain.handle('remove-server', async (e, id) => {
   if (serverProcesses[id]) await killServer(id);
   const srv = appData.servers.find(s=>s.id===id);
   if (srv) {
-    // SAFETY: only ever delete folders Omnex itself created, inside its own
-    // SERVERS_DIR. NEVER delete an imported server's folder — that points at the
-    // user's own existing data that Omnex did not create, so removing an imported
-    // server must only un-list it and leave every file on disk untouched.
+    // SAFETY: only ever delete a folder that lives inside Omnex's own SERVERS_DIR.
+    // Imports are now COPIED into SERVERS_DIR, so this deletes Omnex's copy and
+    // never the user's original. Any server whose folder is outside SERVERS_DIR —
+    // e.g. a legacy in-place import from an older version — is left fully untouched.
     const dir = srv.installDir ? path.resolve(srv.installDir) : '';
     const serversRoot = path.resolve(SERVERS_DIR);
     const insideServersDir = dir && (dir === serversRoot || dir.startsWith(serversRoot + path.sep));
-    if (!srv.imported && insideServersDir && fs.existsSync(dir)) {
+    if (insideServersDir && fs.existsSync(dir)) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch(e) {}
     }
   }
@@ -2908,34 +2908,29 @@ ipcMain.handle('import-server', async (e, config) => {
   const { name, game, port, importDir } = config;
   if (!fs.existsSync(importDir)) return { ok: false, error: 'Directory not found' };
 
-  const id = `srv_${Date.now()}`;
+  const id  = `srv_${Date.now()}`;
   const def = GAME_DEFS[game];
 
-  // Try to find the executable in the import directory
-  let execPath = '';
-  if (def?.startExe) {
-    execPath = findExe(importDir, def.startExe) || '';
-  }
-
-  // For Minecraft, look for server.jar
-  if (game === 'Minecraft') {
-    const jar = path.join(importDir, 'server.jar');
-    if (fs.existsSync(jar)) execPath = jar;
-  }
+  // Copy the existing server INTO Omnex's own SERVERS_DIR and run from that copy.
+  // The user's original folder is never referenced again, so nothing Omnex does
+  // afterward (including Remove) can ever touch or delete their original files.
+  const { dir: installDir } = uniqueInstallDir(sanitizeFolderName(name || `${game} Server`));
 
   const server = {
     id,
-    name:       name || `${game} Server`,
+    name:            name || `${game} Server`,
     game,
-    icon:       config.icon,
-    fallback:   config.fallback,
-    port:       port || '25565',
-    installDir: importDir,
-    execPath,
-    status:     'offline',
-    imported:   true,
-    mcType:     config.mcType,
-    mcVersion:  config.mcVersion,
+    icon:            config.icon,
+    fallback:        config.fallback,
+    port:            port || '25565',
+    installDir,
+    execPath:        '',
+    status:          'installing',
+    imported:        true,
+    copiedIntoOmnex: true,
+    sourcePath:      importDir,
+    mcType:          config.mcType,
+    mcVersion:       config.mcVersion,
   };
   // Palworld: default to showing in community server list
   if (game === 'Palworld') server.showInPublicList = true;
@@ -2943,7 +2938,35 @@ ipcMain.handle('import-server', async (e, config) => {
   appData.servers.push(server);
   saveData();
   emit('server-added', server);
-  return { ok: true, server };
+
+  try {
+    log(id, 'info', `Importing ${server.name} — copying files into Omnex...`);
+    log(id, 'dim', `Source: ${importDir}`);
+    log(id, 'dim', 'Your original folder is left completely untouched; Omnex runs from its own copy.');
+    fs.mkdirSync(installDir, { recursive: true });
+    // Full recursive copy of the existing server (world, configs, binaries).
+    await fs.promises.cp(importDir, installDir, { recursive: true });
+
+    // Locate the executable inside the copy.
+    let execPath = '';
+    if (def?.startExe) execPath = findExe(installDir, def.startExe) || '';
+    if (game === 'Minecraft') {
+      const jar = path.join(installDir, 'server.jar');
+      if (fs.existsSync(jar)) execPath = jar;
+    }
+    server.execPath = execPath;
+    server.status   = 'offline';
+    saveData();
+    log(id, 'success', `✔ Imported ${server.name} (copied into Omnex). Your original folder was not modified.`);
+    emit('install-complete', { serverId: id });
+    return { ok: true, server };
+  } catch (err) {
+    server.status = 'error';
+    saveData();
+    log(id, 'error', `Import failed while copying: ${err.message}`);
+    emit('install-error', { serverId: id, error: err.message });
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('browse-folder', async () => {

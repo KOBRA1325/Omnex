@@ -675,14 +675,20 @@ async function confirmRename(id) {
   }
 }
 
+// Accurate Remove confirmation depending on how the server got here.
+function removeServerMessage(s) {
+  if (s.copiedIntoOmnex)
+    return `Remove "${s.name}"?\n\nThis deletes Omnex's own copy of the server. Your original imported folder is left completely untouched.`;
+  if (s.imported)
+    return `Remove "${s.name}" from Omnex?\n\nYour original folder and files will NOT be deleted — this only removes it from the list.`;
+  return `Remove "${s.name}"?\n\nThis permanently deletes its installed server files and cannot be undone.`;
+}
+
 async function ctxRemoveServer(id) {
   hideServerContextMenu();
   const s = servers.find(sv => sv.id === id);
   if (!s) return;
-  const msg = s.imported
-    ? `Remove "${s.name}" from Omnex?\n\nYour original server folder and files will NOT be deleted — this only removes it from the list.`
-    : `Remove "${s.name}"?\n\nThis permanently deletes its installed server files and cannot be undone.`;
-  if (!confirm(msg)) return;
+  if (!confirm(removeServerMessage(s))) return;
   try {
     await window.nexus.removeServer(id);
     servers = servers.filter(sv => sv.id !== id);
@@ -918,10 +924,7 @@ async function sendCommand() {
 }
 async function removeCurrentServer() {
   const s = getActive(); if (!s) return;
-  const msg = s.imported
-    ? `Remove "${s.name}" from Omnex?\n\nYour original server folder and files will NOT be deleted — this only removes it from the list.`
-    : `Remove "${s.name}"?\n\nThis permanently deletes its installed server files and cannot be undone.`;
-  if (!confirm(msg)) return;
+  if (!confirm(removeServerMessage(s))) return;
   const removedName = s.name;
   clearInterval(statsInterval); clearInterval(uptimeInterval);
   await window.nexus.removeServer(s.id);
@@ -1074,13 +1077,14 @@ async function doImportServer() {
   const port = document.getElementById('importPort')?.value.trim() || importDetectedGame.port;
   const btn = document.getElementById('btnInstall'); if(btn){btn.disabled=true;btn.textContent='Importing...';}
   closeAddModal();
-  const result = await window.nexus.importServer({ name, port, game:importDetectedGame.name, icon:importDetectedGame.icon, fallback:importDetectedGame.fallback, importDir:importPath });
+  // The server is added via the 'server-added' event and finalized on
+  // 'install-complete' (same as install), so we don't push it here.
+  showToast('📂', `Importing ${name} — copying files, watch the console...`);
+  try {
+    const result = await window.nexus.importServer({ name, port, game:importDetectedGame.name, icon:importDetectedGame.icon, fallback:importDetectedGame.fallback, importDir:importPath });
+    if (!result.ok) showToast('❌', result.error||'Import failed');
+  } catch(e) { showToast('❌', e.message); }
   if(btn){btn.disabled=false;btn.textContent='📂 Import Server';}
-  if (result.ok) {
-    servers.push({...result.server, status:'offline'});
-    renderSidebar(); selectServer(result.server.id);
-    showToast('✅', `${name} imported`);
-  } else showToast('❌', result.error||'Import failed');
 }
 
 // ── Templates ─────────────────────────────────────────────────────────────────
