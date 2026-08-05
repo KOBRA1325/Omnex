@@ -652,25 +652,40 @@ async function runInstall(id, server, config) {
 
   if (def.type === 'steam' || def.type === 'steam_auth') {
     await ensureSteamCmd(id);
+    // Provision the Visual C++ runtime that Steam servers need to launch.
+    await ensureVCRedist(id);
+
+    // Prepare Steam login (only for games that require an account).
+    let username = '', password = '';
     if (def.type === 'steam_auth') {
-      // Needs Steam login
       const creds = loadSteamCreds();
-      const username = creds.username || '';
-      const password = creds.password || '';
+      username = creds.username || '';
+      password = creds.password || '';
       if (!username || !password) {
         emit('install-needs-auth', { serverId: id });
         throw new Error('Steam account not connected. Go to Settings → Connections to connect your Steam account.');
       }
       log(id, 'info', `Using Steam account: ${username}`);
-      // Use SteamCMD cached session - no Steam Guard prompts needed
-      // Codes can only be used once and expire, so reusing them causes 'two-factor mismatch'
-      await installViaSteamCmdAuth(id, server.installDir, def.serverAppId, server.game, username, password, '');
-      // Clear stored password
-      delete server.steamPass;
-    } else {
-      await installViaSteamCmd(id, server.installDir, def.serverAppId, server.game);
     }
-    const exePath = findExe(server.installDir, def.startExe);
+
+    // Run SteamCMD, retrying if the server exe never appears. SteamCMD frequently
+    // self-updates on the first run and doesn't finish the app download in one
+    // pass (leaving a partial folder), so a second/third pass resumes and completes
+    // it. Real auth errors reject and break out of the loop without retrying.
+    const MAX_STEAM_ATTEMPTS = 3;
+    let exePath = '';
+    for (let attempt = 1; attempt <= MAX_STEAM_ATTEMPTS; attempt++) {
+      if (attempt > 1) log(id, 'warn', `⚠ SteamCMD didn't finish the download — retrying (attempt ${attempt}/${MAX_STEAM_ATTEMPTS})...`);
+      if (def.type === 'steam_auth') {
+        await installViaSteamCmdAuth(id, server.installDir, def.serverAppId, server.game, username, password, '');
+      } else {
+        await installViaSteamCmd(id, server.installDir, def.serverAppId, server.game);
+      }
+      exePath = findExe(server.installDir, def.startExe);
+      if (exePath) break;
+    }
+    if (def.type === 'steam_auth') delete server.steamPass; // clear stored password
+
     server.execPath = exePath || '';
     // Don't bake args at install time - regenerate them at start time so port changes apply
     server.args     = '';
@@ -685,7 +700,7 @@ async function runInstall(id, server, config) {
       try { contents = fs.readdirSync(server.installDir); } catch(e) {}
       log(id, 'error', `❌ Install completed but ${def.startExe} not found in ${server.installDir}`);
       log(id, 'error', `   Folder contents: ${contents.length > 0 ? contents.join(', ') : '(empty)'}`);
-      log(id, 'error', `   This usually means SteamCMD failed silently. Check Steam Guard / credentials.`);
+      log(id, 'error', `   SteamCMD did not finish downloading after ${MAX_STEAM_ATTEMPTS} attempts. Check disk space, antivirus, or Steam Guard / credentials, then try again.`);
       throw new Error(`${def.startExe} not found after install - SteamCMD did not actually download the files`);
     } else {
       log(id, 'success', `✔ Found ${def.startExe} at ${exePath}`);
@@ -1027,6 +1042,48 @@ async function ensureSteamCmd(serverId) {
   log(serverId,'info','Extracting SteamCMD...');
   await extractZip(zipPath, STEAMCMD_DIR);
   log(serverId,'success','✔ SteamCMD ready.');
+}
+
+// Ensure the Microsoft Visual C++ x64 runtime is present. Almost every Steam
+// dedicated server needs it to launch, and a fresh Windows install won't have it.
+// A gaming PC usually already does (installed by other games), which is why this
+// only bites clean machines. Downloads Microsoft's official evergreen redist and
+// installs it silently. Non-fatal: if it can't confirm, the server may still run.
+let vcRedistReady = false;
+async function ensureVCRedist(serverId) {
+  if (vcRedistReady || process.platform !== 'win32') { vcRedistReady = true; return; }
+  const sysRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+  const dll1 = path.join(sysRoot, 'System32', 'vcruntime140.dll');
+  const dll2 = path.join(sysRoot, 'System32', 'vcruntime140_1.dll');
+  if (fs.existsSync(dll1) && fs.existsSync(dll2)) { vcRedistReady = true; return; }
+
+  log(serverId, 'info', '📦 Installing Microsoft Visual C++ Runtime (required to run game servers)...');
+  const depsDir = path.join(USER_DATA, 'deps');
+  const installer = path.join(depsDir, 'vc_redist.x64.exe');
+  try {
+    fs.mkdirSync(depsDir, { recursive: true });
+    await downloadFile('https://aka.ms/vs/17/release/vc_redist.x64.exe', installer, pct => {
+      const filled = Math.floor(pct / 5);
+      const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+      emit('console-progress', { serverId, text: `📦 Visual C++ Runtime  [${bar}] ${pct}%` });
+    });
+    await new Promise(resolve => {
+      // Exit codes: 0 = ok, 3010 = ok (restart needed), 1638 = newer already installed.
+      const p = spawn(installer, ['/install', '/quiet', '/norestart'], { windowsHide: true });
+      p.on('close', () => resolve());
+      p.on('error', () => resolve());
+    });
+    if (fs.existsSync(dll1) && fs.existsSync(dll2)) {
+      log(serverId, 'success', '✔ Visual C++ Runtime installed.');
+      vcRedistReady = true;
+    } else {
+      log(serverId, 'warn', '⚠ Visual C++ Runtime install could not be confirmed. If a server fails to start, install the latest "Visual C++ Redistributable (x64)" from Microsoft.');
+    }
+  } catch (err) {
+    log(serverId, 'warn', `⚠ Could not auto-install Visual C++ Runtime: ${err.message}. Server may still run if it is already present.`);
+  } finally {
+    try { fs.unlinkSync(installer); } catch(e) {}
+  }
 }
 
 function installViaSteamCmd(serverId, installDir, appId, gameName) {
@@ -3937,6 +3994,12 @@ async function startServerById(id) {
 
   const def = GAME_DEFS[server.game];
   let exe, args;
+
+  // Steam servers need the VC++ runtime to launch; ensure it's present before
+  // starting (covers imported/copied servers that never ran through the installer).
+  if (def?.type === 'steam' || def?.type === 'steam_auth') {
+    try { await ensureVCRedist(id); } catch(e) {}
+  }
 
   if (def?.type === 'minecraft' || def?.useJava) {
     try {
