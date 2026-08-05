@@ -1505,6 +1505,8 @@ async function saveServerConfig() {
 }
 function renderSteamConfig(card, result, arHtml, s, scope) {
   scope = scope || 'full'; // 'basic' | 'advanced' | 'full'
+  // The basic panel has no Save button, so its fields must persist on edit.
+  const chgFn = scope === 'basic' ? 'updateSteamPropAndSave' : 'updateSteamProp';
   const props = result.props||{}, defs = result.defs;
   let html = '<div class="config-groups">';
   if (result.empty) html += `<div class="empty-msg-sm" style="color:var(--yellow);margin-bottom:8px">⚠ ${result.error}</div>`;
@@ -1529,11 +1531,11 @@ function renderSteamConfig(card, result, arHtml, s, scope) {
         html += `<button class="cfg-bool-btn ${checked?'on':''}" onclick="toggleSteamBool('${def.key}','${tv}','${fv}',this)">
           <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${checked?tv:fv}</span></button>`;
       } else if (def.type==='select') {
-        html += `<select class="config-input" onchange="updateSteamProp('${def.key}',this.value)">`;
+        html += `<select class="config-input" onchange="${chgFn}('${def.key}',this.value)">`;
         for (const opt of def.options) html += `<option value="${opt}" ${val===opt?'selected':''}>${opt}</option>`;
         html += '</select>';
       } else {
-        html += `<input class="config-input" type="${def.type==='number'?'number':'text'}" value="${escapeHtml(String(val))}" placeholder="${def.placeholder||''}" onchange="updateSteamProp('${def.key}',this.value)">`;
+        html += `<input class="config-input" type="${def.type==='number'?'number':'text'}" value="${escapeHtml(String(val))}" placeholder="${def.placeholder||''}" onchange="${chgFn}('${def.key}',this.value)">`;
       }
       html += '</div>';
     }
@@ -1551,6 +1553,16 @@ function renderSteamConfig(card, result, arHtml, s, scope) {
   window._steamConfigProps = { ...props };
 }
 function updateSteamProp(key, val) { window._steamConfigProps=window._steamConfigProps||{}; window._steamConfigProps[key]=val; }
+// Basic config panel has no Save button — persist to the config file on edit.
+async function updateSteamPropAndSave(key, val) {
+  updateSteamProp(key, val);
+  const s = getActive();
+  if (!s || !window._steamConfigPath) { showToast('⚠️','Open "More Settings" to save — no config file yet'); return; }
+  try {
+    const r = await window.nexus.writeSteamConfig(s.id, window._steamConfigProps, window._steamConfigPath);
+    showToast(r && r.ok ? '💾' : '❌', r && r.ok ? 'Saved — restart the server to apply.' : (r && r.error) || 'Save failed');
+  } catch(e) { showToast('❌', e.message); }
+}
 function toggleSteamBool(key, tv, fv, btn) {
   window._steamConfigProps=window._steamConfigProps||{};
   const cur=window._steamConfigProps[key]; const next=cur===tv?fv:tv;
