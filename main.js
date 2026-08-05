@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const fs     = require('fs');
 const https  = require('https');
 const http   = require('http');
+const net    = require('net');
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 const USER_DATA    = app.getPath('userData');
@@ -4051,6 +4052,10 @@ async function startServerById(id) {
   // Sync user's name and port to per-game config files (in case they changed after install)
   syncServerConfig(id, server, /* isInstall */ false);
 
+  // Palworld: make sure RCON is enabled with a known admin password so we can
+  // gracefully shut it down and read live player counts.
+  if (server.game === 'Palworld') configurePalworldRcon(server);
+
   const def = GAME_DEFS[server.game];
   let exe, args;
 
@@ -4219,7 +4224,100 @@ ipcMain.handle('send-command',  (e,{id,command}) => {
   try { proc.stdin.write(command+'\n'); return { ok:true }; } catch(e) { return { ok:false, error:e.message }; }
 });
 
-function killServer(id) {
+// ── RCON (Source protocol) — graceful Palworld shutdown + live player counts ──
+// Connects, authenticates, runs one command, returns the response text.
+// Resolves null on any failure — RCON is best-effort and never blocks a stop.
+function rconCommand(host, port, password, command, timeoutMs = 3000) {
+  return new Promise(resolve => {
+    if (!password) return resolve(null);
+    let settled = false, authed = false, buf = Buffer.alloc(0);
+    const socket = new net.Socket();
+    const done = (val) => { if (settled) return; settled = true; try { socket.destroy(); } catch(e){} resolve(val); };
+    const encode = (id, type, body) => {
+      const b = Buffer.from(String(body), 'ascii');
+      const size = 10 + b.length;                       // id(4) + type(4) + body + 2 nulls
+      const pkt = Buffer.alloc(4 + size);
+      pkt.writeInt32LE(size, 0); pkt.writeInt32LE(id, 4); pkt.writeInt32LE(type, 8); b.copy(pkt, 12);
+      return pkt;
+    };
+    socket.setTimeout(timeoutMs, () => done(null));
+    socket.on('error', () => done(null));
+    socket.on('connect', () => socket.write(encode(1, 3, password))); // SERVERDATA_AUTH
+    socket.on('data', chunk => {
+      buf = Buffer.concat([buf, chunk]);
+      while (buf.length >= 4) {
+        const size = buf.readInt32LE(0);
+        if (size < 10 || buf.length < 4 + size) break;
+        const id = buf.readInt32LE(4), type = buf.readInt32LE(8);
+        const body = buf.toString('ascii', 12, 4 + size - 2);
+        buf = buf.subarray(4 + size);
+        if (!authed) {
+          if (id === -1) return done(null);                          // auth failed
+          if (type === 2) { authed = true; socket.write(encode(2, 2, command)); } // authed → exec
+        } else {
+          return done(body);                                          // command response
+        }
+      }
+    });
+    socket.connect(port || 25575, host || '127.0.0.1');
+  });
+}
+
+// Ensure a Palworld server has RCON enabled with an admin password Omnex knows,
+// so it can gracefully shut down (deregisters from the community list) and read
+// player counts. Only generates an admin password if the user hasn't set one.
+function configurePalworldRcon(server) {
+  try {
+    const iniPath = path.join(server.installDir, 'Pal', 'Saved', 'Config', 'WindowsServer', 'PalWorldSettings.ini');
+    if (!fs.existsSync(iniPath)) return;
+    let raw = fs.readFileSync(iniPath, 'utf8');
+    const m = raw.match(/OptionSettings=\(([\s\S]*?)\)/);
+    if (!m) return;
+    const map = new Map(); const parts = []; let cur = '', q = false;
+    for (const ch of m[1]) { if (ch === '"') { q = !q; cur += ch; } else if (ch === ',' && !q) { parts.push(cur); cur = ''; } else cur += ch; }
+    if (cur.trim()) parts.push(cur);
+    for (const p of parts) { const e = p.indexOf('='); if (e > -1) map.set(p.slice(0, e).trim(), p.slice(e + 1).trim()); }
+    let changed = false;
+    if (map.get('RCONEnabled') !== 'True') { map.set('RCONEnabled', 'True'); changed = true; }
+    const rconPort = parseInt(String(map.get('RCONPort') || '').replace(/[^0-9]/g, ''), 10) || 25575;
+    if (!map.has('RCONPort')) { map.set('RCONPort', String(rconPort)); changed = true; }
+    let admin = String(map.get('AdminPassword') || '').replace(/^"|"$/g, '');
+    if (!admin) {
+      admin = 'omnex' + Math.random().toString(36).slice(2, 10);
+      map.set('AdminPassword', `"${admin}"`); changed = true;
+      log(server.id, 'dim', 'Enabled RCON with an auto-generated admin password (for graceful shutdown + player counts). You can view/change it in Config → Admin Password.');
+    }
+    if (changed) {
+      const tuple = Array.from(map.entries()).map(([k, v]) => `${k}=${v}`).join(',');
+      raw = raw.replace(/OptionSettings=\([\s\S]*?\)/, `OptionSettings=(${tuple})`);
+      fs.writeFileSync(iniPath, raw);
+    }
+    server.rconPort = rconPort;
+    server.rconPassword = admin;
+  } catch(e) {}
+}
+
+// Graceful stop: for Palworld with RCON, ask the server to shut down cleanly
+// first (so it deregisters from the community list quickly), then hard-kill.
+async function killServer(id) {
+  const srv  = appData.servers.find(s => s.id === id);
+  const proc = serverProcesses[id];
+  if (proc && srv && srv.game === 'Palworld' && srv.rconPassword) {
+    proc._omnexIntentionalStop = true;
+    try {
+      const res = await rconCommand('127.0.0.1', srv.rconPort || 25575, srv.rconPassword, 'Shutdown 1 Server_shutting_down');
+      if (res !== null) {
+        log(id, 'dim', 'Sent graceful shutdown via RCON — the community listing will clear quickly.');
+        for (let i = 0; i < 8 && serverProcesses[id]; i++) await new Promise(r => setTimeout(r, 500)); // up to ~4s to exit
+      }
+    } catch(e) {}
+    if (!serverProcesses[id]) { srv.pid = null; saveData(); return { ok:true }; }
+  }
+  return hardKill(id);
+}
+
+// Force-kill: taskkill the tracked PID (+ children) with an image-name backstop.
+function hardKill(id) {
   return new Promise(resolve => {
     const proc = serverProcesses[id];
     const srv  = appData.servers.find(s => s.id === id);
@@ -4386,6 +4484,22 @@ setInterval(() => {
     if (sched.action==='restart' || sched.action==='stop') runScheduledShutdown(sched.serverId, sched.action, sched.warnMinutes);
   });
 }, 60000);
+
+// ── Live player counts via RCON (Palworld) ──────────────────────────────────
+// Poll running Palworld servers for their online players so the dashboard count
+// updates without relying on console parsing (which Palworld doesn't emit).
+setInterval(async () => {
+  for (const s of appData.servers) {
+    if (s.game !== 'Palworld' || !serverProcesses[s.id] || !s.rconPassword) continue;
+    const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
+    if (res === null) continue;
+    // Response is CSV: header line "name,playeruid,steamid" then one row per player.
+    const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
+    const players = rows.slice(1).map(r => r.split(',')[0]).filter(n => n && n.toLowerCase() !== 'name');
+    s.players = players;
+    emit('players-updated', { serverId: s.id, players });
+  }
+}, 20000);
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function findExe(dir, name) {
