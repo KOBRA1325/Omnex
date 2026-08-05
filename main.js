@@ -300,6 +300,14 @@ const GAME_DEFS = {
   'Enshrouded':      { type:'steam', serverAppId:'2278520',startExe:'enshrouded_server.exe',    startArgs:(d,s)=>[] },
 };
 
+// Games where the real server can detach from the process we spawned, so on Stop
+// we also kill by image name as a backstop. ONLY for games that run a single
+// instance per machine (Palworld is pinned to Steam query port 27015), so this
+// can never accidentally kill a second, unrelated server on the same box.
+const FORCE_KILL_IMAGES = {
+  'Palworld': ['PalServer-Win64-Shipping-Cmd.exe', 'PalServer-Win64-Shipping.exe', 'PalServer.exe'],
+};
+
 // ── Data ─────────────────────────────────────────────────────────────────────
 function loadData() {
   try { if (fs.existsSync(DATA_FILE)) return JSON.parse(fs.readFileSync(DATA_FILE,'utf8')); } catch(e){}
@@ -377,7 +385,9 @@ function createWindow() {
   });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Kill any servers orphaned by a previous session before showing the UI.
+  try { await cleanupOrphanedServers(); } catch(e) {}
   createWindow();
   setupTray();
   initAutoUpdater();
@@ -386,10 +396,23 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
-  // Stop stats refresh and clean up
+  // Stop stats refresh and force-kill running servers so we don't leave orphans.
   statsCacheTime = 0;
   Object.keys(serverProcesses).forEach(id => {
-    try { serverProcesses[id]?.kill('SIGTERM'); } catch(e) {}
+    const proc = serverProcesses[id];
+    try {
+      if (process.platform === 'win32' && proc?.pid) {
+        spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true });
+        const srv = appData.servers.find(s => s.id === id);
+        const images = (srv && FORCE_KILL_IMAGES[srv.game]) || [];
+        if (images.length) {
+          const imgArgs = []; images.forEach(img => { imgArgs.push('/IM', img); });
+          spawn('taskkill', ['/F', '/T', ...imgArgs], { windowsHide: true });
+        }
+      } else {
+        proc?.kill('SIGTERM');
+      }
+    } catch(e) {}
   });
 });
 
@@ -1058,6 +1081,7 @@ async function ensureVCRedist(serverId) {
   if (fs.existsSync(dll1) && fs.existsSync(dll2)) { vcRedistReady = true; return; }
 
   log(serverId, 'info', '📦 Installing Microsoft Visual C++ Runtime (required to run game servers)...');
+  log(serverId, 'warn', '👉 If Windows shows a security / "Do you want to allow this app to make changes?" prompt, click Yes to continue.');
   const depsDir = path.join(USER_DATA, 'deps');
   const installer = path.join(depsDir, 'vc_redist.x64.exe');
   try {
@@ -1067,14 +1091,32 @@ async function ensureVCRedist(serverId) {
       const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
       emit('console-progress', { serverId, text: `📦 Visual C++ Runtime  [${bar}] ${pct}%` });
     });
-    await new Promise(resolve => {
-      // Exit codes: 0 = ok, 3010 = ok (restart needed), 1638 = newer already installed.
-      const p = spawn(installer, ['/install', '/quiet', '/norestart'], { windowsHide: true });
-      p.on('close', () => resolve());
-      p.on('error', () => resolve());
+    log(serverId, 'info', '⏳ Installing Visual C++ Runtime (this can take a minute — there is no progress bar during the install step)...');
+    // Keep the console alive so a silent install never looks frozen.
+    const installTick = setInterval(() => emit('console-progress', { serverId, text: '⏳ Installing Visual C++ Runtime...' }), 4000);
+    const code = await new Promise(resolve => {
+      let done = false;
+      const finish = (c) => { if (!done) { done = true; resolve(c); } };
+      // A hung installer (e.g. Windows Installer busy on a fresh machine) must never
+      // block the whole server install — give up after 3 min and continue. We don't
+      // kill it, so it can finish in the background; the DLL check catches it later.
+      const timer = setTimeout(() => {
+        log(serverId, 'warn', '⚠ Visual C++ Runtime installer is taking unusually long — continuing without waiting. If the server fails to start, install "Visual C++ Redistributable (x64)" from Microsoft manually.');
+        finish(-1);
+      }, 180000);
+      try {
+        // Exit codes: 0 = ok, 3010 = ok (restart needed), 1638 = newer already installed.
+        const p = spawn(installer, ['/install', '/quiet', '/norestart'], { windowsHide: true });
+        p.on('close', c => { clearTimeout(timer); finish(c); });
+        p.on('error', () => { clearTimeout(timer); finish(-1); });
+      } catch(e) { clearTimeout(timer); finish(-1); }
     });
+    clearInterval(installTick);
     if (fs.existsSync(dll1) && fs.existsSync(dll2)) {
       log(serverId, 'success', '✔ Visual C++ Runtime installed.');
+      vcRedistReady = true;
+    } else if ([0, 3010, 1638].includes(code)) {
+      log(serverId, 'success', '✔ Visual C++ Runtime is present.');
       vcRedistReady = true;
     } else {
       log(serverId, 'warn', '⚠ Visual C++ Runtime install could not be confirmed. If a server fails to start, install the latest "Visual C++ Redistributable (x64)" from Microsoft.');
@@ -4042,6 +4084,10 @@ async function startServerById(id) {
   try {
     const proc = spawn(exe, args, { cwd:server.installDir, shell: !!server.useShell, windowsHide: true });
     serverProcesses[id] = proc;
+    // Persist the PID so a later Omnex session (after a restart/update/crash) can
+    // find and clean up this process instead of leaving it orphaned and joinable.
+    server.pid = proc.pid;
+    saveData();
     log(id, 'success', `✔ Process spawned (PID: ${proc.pid})`);
     notify('start', {
       title: `▶ ${server.name} started`,
@@ -4115,9 +4161,9 @@ async function startServerById(id) {
           ],
         });
       }
-      // Clear player list on stop
+      // Clear player list + persisted PID on stop
       const stoppedSrv = appData.servers.find(s => s.id === id);
-      if (stoppedSrv) { stoppedSrv.players = []; }
+      if (stoppedSrv) { stoppedSrv.players = []; stoppedSrv.pid = null; saveData(); }
       emit('players-updated', { serverId: id, players: [] });
       emit('server-stopped', { serverId:id, code });
       stopLogTailer(id);
@@ -4159,35 +4205,90 @@ ipcMain.handle('send-command',  (e,{id,command}) => {
 function killServer(id) {
   return new Promise(resolve => {
     const proc = serverProcesses[id];
-    if (!proc) return resolve({ ok:true });
+    const srv  = appData.servers.find(s => s.id === id);
+    const images = (srv && FORCE_KILL_IMAGES[srv.game]) || [];
+
+    let done = false;
+    const finish = () => {
+      if (done) return; done = true;
+      if (srv) { srv.pid = null; saveData(); }
+      delete serverProcesses[id];
+      resolve({ ok:true });
+    };
+
+    // Backstop: kill the game's known server exe(s) by image name to catch any
+    // process that detached from the one we spawned. Only runs for single-instance
+    // games (FORCE_KILL_IMAGES), so it can't hit another unrelated server.
+    const forceKillImages = () => new Promise(res => {
+      if (!images.length || process.platform !== 'win32') return res();
+      const imgArgs = [];
+      images.forEach(img => { imgArgs.push('/IM', img); });
+      const k = spawn('taskkill', ['/F', '/T', ...imgArgs], { windowsHide: true });
+      k.on('close', () => res());
+      k.on('error', () => res());
+    });
+
+    if (!proc) {
+      // Nothing tracked — still run the image backstop in case an orphan is alive.
+      forceKillImages().then(finish);
+      return;
+    }
 
     // Mark this kill as intentional so proc.on('close') doesn't log it as a crash
     proc._omnexIntentionalStop = true;
 
     if (process.platform === 'win32' && proc.pid) {
-      // On Windows, spawn taskkill to kill the process AND all its children (/T = tree, /F = force)
-      // This is critical for games like Palworld where the .exe is a launcher that spawns a child
+      // taskkill kills the process AND its children (/T = tree, /F = force).
       const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true });
-      killer.on('close', () => {
-        delete serverProcesses[id];
-        resolve({ ok:true });
-      });
-      // Fallback in case taskkill hangs
-      setTimeout(() => {
+      const fallback = setTimeout(() => {
         try { proc.kill('SIGKILL'); } catch(e) {}
-        delete serverProcesses[id];
-        resolve({ ok:true });
+        forceKillImages().then(finish);
       }, 8000);
+      const after = () => { clearTimeout(fallback); forceKillImages().then(finish); };
+      killer.on('close', after);
+      killer.on('error', after);
     } else {
       // POSIX / dev: SIGTERM then SIGKILL after 5s
       try { proc.kill('SIGTERM'); } catch(e){}
       setTimeout(() => {
         try { if(serverProcesses[id]) proc.kill('SIGKILL'); } catch(e){}
-        delete serverProcesses[id];
-        resolve({ok:true});
+        finish();
       }, 5000);
     }
   });
+}
+
+// On launch, clean up game-server processes left running by a previous Omnex
+// session (a crash, force-close, or auto-update restart loses the in-memory
+// handle, leaving the server alive, joinable, and holding its ports). We match
+// the persisted PID AND its image name so a reused PID can never hit an
+// unrelated process.
+async function cleanupOrphanedServers() {
+  if (process.platform !== 'win32') return;
+  const withPid = appData.servers.filter(s => s.pid);
+  if (!withPid.length) return;
+  for (const s of withPid) {
+    const pid = s.pid;
+    const exe = s.execPath ? path.basename(s.execPath) : '';
+    s.pid = null; // clear the record regardless of outcome
+    if (!pid || !exe) continue;
+    const alive = await new Promise(res => {
+      let out = '';
+      const t = spawn('tasklist', ['/FI', `PID eq ${pid}`, '/FI', `IMAGENAME eq ${exe}`, '/NH', '/FO', 'CSV'], { windowsHide: true });
+      t.stdout.on('data', d => out += d.toString());
+      t.on('close', () => res(out.toLowerCase().includes(exe.toLowerCase())));
+      t.on('error', () => res(false));
+    });
+    if (alive) {
+      console.log(`[Omnex] Cleaning orphaned server "${s.name}" (pid ${pid}, ${exe}) left running from a previous session`);
+      await new Promise(res => {
+        const k = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+        k.on('close', () => res());
+        k.on('error', () => res());
+      });
+    }
+  }
+  saveData();
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
