@@ -1345,7 +1345,9 @@ async function openConfigModal() {
       renderMinecraftConfig(body, result.props, arHtml, 'advanced');
       if (saveBtn) { saveBtn.style.display = ''; saveBtn.onclick = () => saveServerConfig(); }
     } else if (result.ok && result.type === 'steam' && result.defs) {
-      renderSteamConfig(body, result, arHtml, s, 'advanced');
+      // 'full' so the modal shows every setting (including basic ones like the
+      // server Password) — the modal's Save button persists them all.
+      renderSteamConfig(body, result, arHtml, s, 'full');
       if (saveBtn) { saveBtn.style.display = ''; saveBtn.onclick = () => saveSteamConfig(result.configPath); }
     } else {
       body.innerHTML = `<div class="empty-msg-sm" style="text-align:left;color:var(--text-dim);font-size:12px;line-height:1.7;padding:24px">
