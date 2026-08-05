@@ -931,11 +931,12 @@ html, body { width: 100%; height: 100%; overflow: hidden; }
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
-  width: 95px;
+  width: 130px;
   line-height: 1.3;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Wrap long labels instead of truncating them so no setting name is hidden. */
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .config-input {
   flex: 1;
