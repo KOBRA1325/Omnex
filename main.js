@@ -332,6 +332,23 @@ const serverProcesses = {};
 
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
+
+// Enforce a single running instance. A second launch focuses the existing
+// window and quits — two Omnex instances can never run at once and fight over
+// servers.json, PIDs, or each other's server processes.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 function createWindow() {
   const isDev = !app.isPackaged;
   mainWindow = new BrowserWindow({
@@ -385,7 +402,7 @@ function createWindow() {
   });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
-app.whenReady().then(async () => {
+if (gotSingleInstanceLock) app.whenReady().then(async () => {
   // Kill any servers orphaned by a previous session before showing the UI.
   try { await cleanupOrphanedServers(); } catch(e) {}
   createWindow();
