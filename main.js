@@ -4156,6 +4156,8 @@ async function startServerById(id) {
           parsePlayerEvent(id, l); // still parse for player names
           return; // but don't show in console
         }
+        // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
+        if (/RCON executed the command\.?\s*ShowPlayers/i.test(l)) return;
         log(id, classifyLine(l), l);
         parsePlayerEvent(id, l);
       });
@@ -4166,6 +4168,7 @@ async function startServerById(id) {
           parsePlayerEvent(id, l);
           return;
         }
+        if (/RCON executed the command\.?\s*ShowPlayers/i.test(l)) return;
         log(id, 'warn', l);
         parsePlayerEvent(id, l);
       });
