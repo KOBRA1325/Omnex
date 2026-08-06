@@ -2379,17 +2379,22 @@ ipcMain.handle('player-action', async (e, { serverId, action, player }) => {
     if (!rc) return { ok: false, error: 'Only kick and ban are available for Palworld.' };
     if (!player) return { ok: false, error: 'Missing player Steam ID.' };
     const host = '127.0.0.1', port = server.rconPort || 25575, pw = server.rconPassword;
-    // Diagnostic: dump the raw player list so we can see the exact ID format Palworld reports.
-    const listRaw = await rconCommand(host, port, pw, 'ShowPlayers');
-    log(serverId, 'dim', `[RCON] ShowPlayers →\n${(listRaw || '(no response)').trim()}`);
-    const cmd = `${rc} ${player}`;
-    log(serverId, 'warn', `[RCON] > ${cmd}`);
-    const res = await rconCommand(host, port, pw, cmd);
-    if (res === null) { log(serverId, 'error', '[RCON] no response (connection/auth failed)'); return { ok: false, error: 'RCON: no response' }; }
-    const resp = String(res).trim();
-    log(serverId, 'dim', `[RCON] < ${resp || '(empty response)'}`);
-    setTimeout(() => pollPalworldPlayers(server), 1500); // refresh the list after the action
-    return { ok: true, response: resp };
+    // Palworld's KickPlayer/BanPlayer expect the user id as steam_<steamid64>;
+    // a bare steamid returns "Failed to Kick". Try that form first, then the raw id.
+    const ids = String(player).startsWith('steam_') ? [player] : [`steam_${player}`, String(player)];
+    let lastResp = '';
+    for (const uid of ids) {
+      const cmd = `${rc} ${uid}`;
+      log(serverId, 'warn', `[RCON] > ${cmd}`);
+      const res = await rconCommand(host, port, pw, cmd);
+      lastResp = res === null ? 'no response' : (String(res).trim() || '(empty response)');
+      log(serverId, 'dim', `[RCON] < ${lastResp}`);
+      if (res !== null && !/fail/i.test(lastResp)) {
+        setTimeout(() => pollPalworldPlayers(server), 1500); // refresh the list after the action
+        return { ok: true, response: lastResp };
+      }
+    }
+    return { ok: false, error: `Palworld: ${lastResp}` };
   }
 
   // Minecraft-style stdin commands.
