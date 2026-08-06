@@ -2367,9 +2367,24 @@ ipcMain.handle('get-players', (e, id) => {
   return server?.players || [];
 });
 
-ipcMain.handle('player-action', (e, { serverId, action, player }) => {
+ipcMain.handle('player-action', async (e, { serverId, action, player }) => {
+  const server = appData.servers.find(s => s.id === serverId);
   const proc = serverProcesses[serverId];
   if (!proc) return { ok: false, error: 'Server not running' };
+
+  // Palworld: kick/ban via RCON using the player's Steam ID.
+  if (server && server.game === 'Palworld') {
+    if (!server.rconPassword) return { ok: false, error: 'RCON not ready — stop and start the server once.' };
+    const rc = { kick: 'KickPlayer', ban: 'BanPlayer' }[action];
+    if (!rc) return { ok: false, error: 'Only kick and ban are available for Palworld.' };
+    if (!player) return { ok: false, error: 'Missing player Steam ID.' };
+    const res = await rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, `${rc} ${player}`);
+    if (res === null) return { ok: false, error: 'RCON command failed.' };
+    setTimeout(() => pollPalworldPlayers(server), 1500); // refresh the list after the action
+    return { ok: true };
+  }
+
+  // Minecraft-style stdin commands.
   const commands = {
     kick:  `kick ${player}`,
     ban:   `ban ${player}`,
@@ -4485,21 +4500,24 @@ setInterval(() => {
   });
 }, 60000);
 
-// ── Live player counts via RCON (Palworld) ──────────────────────────────────
-// Poll running Palworld servers for their online players so the dashboard count
-// updates without relying on console parsing (which Palworld doesn't emit).
-setInterval(async () => {
-  for (const s of appData.servers) {
-    if (s.game !== 'Palworld' || !serverProcesses[s.id] || !s.rconPassword) continue;
-    const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
-    if (res === null) continue;
-    // Response is CSV: header line "name,playeruid,steamid" then one row per player.
-    const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
-    const players = rows.slice(1).map(r => r.split(',')[0]).filter(n => n && n.toLowerCase() !== 'name');
-    s.players = players;
-    emit('players-updated', { serverId: s.id, players });
-  }
-}, 20000);
+// ── Live player list via RCON (Palworld) ────────────────────────────────────
+// Poll a Palworld server's online players (name + Steam ID) so the dashboard
+// shows the list and count without console parsing (which Palworld doesn't emit).
+async function pollPalworldPlayers(s) {
+  if (!s || s.game !== 'Palworld' || !serverProcesses[s.id] || !s.rconPassword) return;
+  const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
+  if (res === null) return;
+  // CSV: header line "name,playeruid,steamid" then one row per player.
+  const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
+  const players = rows.slice(1).map(r => {
+    const c = r.split(',');
+    return { name: (c[0] || '').trim(), steamId: (c[2] || '').trim() };
+  }).filter(p => p.name && p.name.toLowerCase() !== 'name');
+  s.players = players;
+  emit('players-updated', { serverId: s.id, players });
+}
+
+setInterval(() => { for (const s of appData.servers) pollPalworldPlayers(s); }, 20000);
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function findExe(dir, name) {

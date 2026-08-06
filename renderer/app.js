@@ -1292,25 +1292,43 @@ function renderPlayerList(players) {
   if (!players) players = [];
   if(count) count.textContent = players.length>0 ? `${players.length} online` : '';
   if (!players.length) { list.innerHTML='<div class="empty-msg-sm" style="padding:12px">No players online</div>'; return; }
-  list.innerHTML = players.map(name => `
+  const s = getActive();
+  const isPalworld = !!(s && s.game === 'Palworld');
+  const jsStr = v => String(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); // safe for onclick string arg
+  list.innerHTML = players.map(p => {
+    // Players are plain names (Minecraft) or { name, steamId } (Palworld).
+    const name = typeof p === 'string' ? p : (p.name || '');
+    const id   = typeof p === 'string' ? p : (p.steamId || '');
+    const nm = jsStr(name), pid = jsStr(id);
+    let actions;
+    if (isPalworld) {
+      const dis = id ? '' : 'disabled title="No Steam ID yet"';
+      actions = `
+        <button class="btn-player-action btn-kick" onclick="playerAction('kick','${pid}','${nm}')" title="Kick" ${dis}>⚡</button>
+        <button class="btn-player-action btn-ban"  onclick="playerAction('ban','${pid}','${nm}')"  title="Ban"  ${dis}>🚫</button>`;
+    } else {
+      actions = `
+        <button class="btn-player-action" onclick="playerAction('op','${nm}','${nm}')" title="Op">⭐</button>
+        <button class="btn-player-action" onclick="playerAction('deop','${nm}','${nm}')" title="Deop">☆</button>
+        <button class="btn-player-action btn-kick" onclick="playerAction('kick','${nm}','${nm}')" title="Kick">⚡</button>
+        <button class="btn-player-action btn-ban"  onclick="playerAction('ban','${nm}','${nm}')"  title="Ban">🚫</button>`;
+    }
+    return `
     <div class="player-item">
       <div class="player-avatar">👤</div>
       <div class="player-name">${escapeHtml(name)}</div>
-      <div class="player-actions">
-        <button class="btn-player-action" onclick="playerAction('op','${name}')" title="Op">⭐</button>
-        <button class="btn-player-action" onclick="playerAction('deop','${name}')" title="Deop">☆</button>
-        <button class="btn-player-action btn-kick" onclick="playerAction('kick','${name}')" title="Kick">⚡</button>
-        <button class="btn-player-action btn-ban"  onclick="playerAction('ban','${name}')"  title="Ban">🚫</button>
-      </div>
-    </div>`).join('');
+      <div class="player-actions">${actions}</div>
+    </div>`;
+  }).join('');
   const statEl = document.getElementById('statPlayers'); if(statEl) statEl.textContent = String(players.length);
 }
-async function playerAction(action, player) {
+async function playerAction(action, id, name) {
   const s = getActive(); if(!s) return;
-  if ((action==='ban'||action==='kick') && !confirm(`${action==='ban'?'Ban':'Kick'} ${player}?`)) return;
-  const result = await window.nexus.playerAction(s.id, action, player);
-  if(result.ok) showToast(action==='ban'?'🚫':action==='kick'?'⚡':'⭐', `${action}: ${player}`);
-  else showToast('❌', result.error);
+  name = name || id;
+  if ((action==='ban'||action==='kick') && !confirm(`${action==='ban'?'Ban':'Kick'} ${name}?`)) return;
+  const result = await window.nexus.playerAction(s.id, action, id);
+  if(result.ok) showToast(action==='ban'?'🚫':action==='kick'?'⚡':'⭐', `${action}: ${name}`);
+  else showToast('❌', result.error||'Action failed');
 }
 
 // ── Config Card ───────────────────────────────────────────────────────────────
