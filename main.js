@@ -2378,10 +2378,18 @@ ipcMain.handle('player-action', async (e, { serverId, action, player }) => {
     const rc = { kick: 'KickPlayer', ban: 'BanPlayer' }[action];
     if (!rc) return { ok: false, error: 'Only kick and ban are available for Palworld.' };
     if (!player) return { ok: false, error: 'Missing player Steam ID.' };
-    const res = await rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, `${rc} ${player}`);
-    if (res === null) return { ok: false, error: 'RCON command failed.' };
+    const host = '127.0.0.1', port = server.rconPort || 25575, pw = server.rconPassword;
+    // Diagnostic: dump the raw player list so we can see the exact ID format Palworld reports.
+    const listRaw = await rconCommand(host, port, pw, 'ShowPlayers');
+    log(serverId, 'dim', `[RCON] ShowPlayers →\n${(listRaw || '(no response)').trim()}`);
+    const cmd = `${rc} ${player}`;
+    log(serverId, 'warn', `[RCON] > ${cmd}`);
+    const res = await rconCommand(host, port, pw, cmd);
+    if (res === null) { log(serverId, 'error', '[RCON] no response (connection/auth failed)'); return { ok: false, error: 'RCON: no response' }; }
+    const resp = String(res).trim();
+    log(serverId, 'dim', `[RCON] < ${resp || '(empty response)'}`);
     setTimeout(() => pollPalworldPlayers(server), 1500); // refresh the list after the action
-    return { ok: true };
+    return { ok: true, response: resp };
   }
 
   // Minecraft-style stdin commands.

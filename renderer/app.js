@@ -1327,7 +1327,7 @@ async function playerAction(action, id, name) {
   name = name || id;
   if ((action==='ban'||action==='kick') && !confirm(`${action==='ban'?'Ban':'Kick'} ${name}?`)) return;
   const result = await window.nexus.playerAction(s.id, action, id);
-  if(result.ok) showToast(action==='ban'?'🚫':action==='kick'?'⚡':'⭐', `${action}: ${name}`);
+  if(result.ok) showToast(action==='ban'?'🚫':action==='kick'?'⚡':'⭐', result.response ? `${action} ${name}: ${result.response}` : `${action}: ${name}`);
   else showToast('❌', result.error||'Action failed');
 }
 
