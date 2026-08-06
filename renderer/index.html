@@ -336,6 +336,13 @@
       <input type="text" class="form-input" id="schedWarnMinutes" value="15, 5, 1" placeholder="e.g. 15, 5, 1" style="pointer-events:all;">
       <div class="form-hint" style="margin-top:6px">Minutes before the action to announce a warning, comma-separated. In-game chat shows on Minecraft &amp; Terraria; other games get a Discord + console warning. Leave blank for no warning.</div>
     </div>
+    <div class="form-row" id="schedBackupBeforeRestartRow" style="display:none">
+      <label class="form-label">Backup first</label>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; pointer-events:all;">
+        <input type="checkbox" id="schedBackupBeforeRestart" style="pointer-events:all; width:16px; height:16px;">
+        <span style="font-size:12px; color:var(--text-dim)">Back up the world before restarting (server is briefly down during the backup)</span>
+      </label>
+    </div>
     <div class="form-row" id="schedBackupOptions" style="display:none">
       <label class="form-label">Keep Last</label>
       <select class="form-select" id="schedBackupKeep" style="pointer-events:all;">

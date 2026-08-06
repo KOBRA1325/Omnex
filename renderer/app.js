@@ -1131,6 +1131,7 @@ function openScheduleModal() {
   const el = document.getElementById('schedAction'); if(el) el.value='restart';
   const ef = document.getElementById('schedFreq'); if(ef) ef.value='Daily';
   const et = document.getElementById('schedTime'); if(et) et.value='03:00';
+  const bbr = document.getElementById('schedBackupBeforeRestart'); if(bbr) bbr.checked=false;
   onSchedActionChange();
   showModal('schedModal');
 }
@@ -1141,6 +1142,8 @@ function onSchedActionChange() {
   if(opts) opts.style.display = action==='backup' ? 'block' : 'none';
   const warn = document.getElementById('schedWarnOptions');
   if(warn) warn.style.display = (action==='restart'||action==='stop') ? 'block' : 'none';
+  const bbr = document.getElementById('schedBackupBeforeRestartRow');
+  if(bbr) bbr.style.display = action==='restart' ? 'block' : 'none';
 }
 async function saveSchedule() {
   const action     = document.getElementById('schedAction')?.value||'restart';
@@ -1149,12 +1152,14 @@ async function saveSchedule() {
   const backupKeep = parseInt(document.getElementById('schedBackupKeep')?.value||'5');
   const warnMinutes = (document.getElementById('schedWarnMinutes')?.value||'')
     .split(',').map(n=>parseInt(n.trim(),10)).filter(n=>Number.isFinite(n)&&n>0);
+  const backupBeforeRestart = action==='restart' && !!document.getElementById('schedBackupBeforeRestart')?.checked;
   const labels     = {restart:'Restart',stop:'Stop',start:'Start',backup:'Backup'};
   const freqLabel  = {Daily:'Daily',Hourly:'Hourly',Weekly:'Weekly','6hours':'Every 6h'};
   schedules = await window.nexus.saveSchedule({
     action, freq, time, backupKeep: action==='backup'?backupKeep:undefined,
     warnMinutes: (action==='restart'||action==='stop') ? warnMinutes : undefined,
-    label:`${freqLabel[freq]||freq} ${labels[action]}`, serverId:activeId, active:true,
+    backupBeforeRestart,
+    label:`${freqLabel[freq]||freq} ${labels[action]}${backupBeforeRestart?' + backup':''}`, serverId:activeId, active:true,
   });
   renderSchedules(); closeScheduleModal(); showToast('⏰','Scheduled task saved');
 }

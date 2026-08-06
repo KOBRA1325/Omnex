@@ -4482,7 +4482,7 @@ const pendingShutdowns = new Set();
 
 // Run a scheduled stop/restart, optionally preceded by timed in-game warnings.
 // warnMinutes is an array like [15,5,1] — minutes-before-action to announce.
-function runScheduledShutdown(serverId, action, warnMinutes) {
+function runScheduledShutdown(serverId, action, warnMinutes, backupBeforeRestart) {
   if (pendingShutdowns.has(serverId)) return;
   const server = appData.servers.find(s => s.id === serverId);
   if (!server) return;
@@ -4490,8 +4490,15 @@ function runScheduledShutdown(serverId, action, warnMinutes) {
 
   const doAction = async () => {
     pendingShutdowns.delete(serverId);
-    if (action === 'restart') { await killServer(serverId); setTimeout(() => startServerById(serverId), 3000); }
-    else await killServer(serverId);
+    await killServer(serverId);
+    if (action === 'restart') {
+      // Optional clean backup while the server is stopped, then bring it back up.
+      if (backupBeforeRestart) {
+        try { log(serverId, 'info', '💾 Backing up before restart...'); await createBackup(serverId, 'Pre-restart backup', 'scheduled'); }
+        catch(e) { log(serverId, 'error', `⚠ Pre-restart backup failed: ${e.message}`); }
+      }
+      setTimeout(() => startServerById(serverId), 3000);
+    }
   };
 
   // Sanitize: positive whole minutes, unique, largest first.
@@ -4521,7 +4528,15 @@ setInterval(() => {
     let run = (sched.freq==='Daily'&&sched.time===hhmm)||(sched.freq==='Hourly'&&now.getMinutes()===0);
     if (!run||!sched.serverId) return;
     log(sched.serverId,'warn',`[Scheduler] ${sched.label}`);
-    if (sched.action==='restart' || sched.action==='stop') runScheduledShutdown(sched.serverId, sched.action, sched.warnMinutes);
+    if (sched.action==='restart' || sched.action==='stop') {
+      runScheduledShutdown(sched.serverId, sched.action, sched.warnMinutes, sched.backupBeforeRestart);
+    } else if (sched.action==='backup') {
+      createBackup(sched.serverId, 'Scheduled backup', 'scheduled')
+        .then(() => { if (sched.backupKeep > 0) return enforceRetention(sched.serverId, sched.backupKeep); })
+        .catch(e => log(sched.serverId, 'error', `⚠ Scheduled backup failed: ${e.message}`));
+    } else if (sched.action==='start') {
+      startServerById(sched.serverId);
+    }
   });
 }, 60000);
 
