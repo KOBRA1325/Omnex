@@ -1547,7 +1547,7 @@ function renderSteamConfig(card, result, arHtml, s, scope) {
         html += `<button class="cfg-bool-btn ${svVal?'on':''}" onclick="toggleServerField('${s.id}','${def.key}',this)">
           <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${svVal?'ON':'OFF'}</span></button>`;
       } else if (def.type==='bool'||def.type==='bool01') {
-        const checked=val==='true'||val==='1', tv=def.type==='bool01'?'1':'true', fv=def.type==='bool01'?'0':'false';
+        const checked=String(val).toLowerCase()==='true'||val==='1', tv=def.type==='bool01'?'1':'true', fv=def.type==='bool01'?'0':'false';
         html += `<button class="cfg-bool-btn ${checked?'on':''}" onclick="toggleSteamBool('${def.key}','${tv}','${fv}',this)">
           <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${checked?tv:fv}</span></button>`;
       } else if (def.type==='select') {

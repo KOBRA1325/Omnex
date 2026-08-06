@@ -1900,6 +1900,10 @@ const GAME_CONFIG_DEFS = {
         { key: 'RCONEnabled',             label: 'RCON Enabled',       type: 'bool' },
         { key: 'RCONPort',                label: 'RCON Port',          type: 'number' },
       ]},
+      { group: '🌐 Cross-Server (Global Palbox)', props: [
+        { key: 'bAllowGlobalPalboxExport', label: 'Allow Global Palbox Export', type: 'bool' },
+        { key: 'bAllowGlobalPalboxImport', label: 'Allow Global Palbox Import', type: 'bool' },
+      ]},
     ],
   },
 };
@@ -2064,7 +2068,10 @@ ipcMain.handle('write-steam-config', (e, { id, props, configPath }) => {
             if (stringKeys.has(k)) {
               existing.set(k, `"${String(v).replace(/"/g,'')}"`);
             } else {
-              existing.set(k, String(v));
+              // Palworld writes bools as True/False — normalize so toggles match its format.
+              let val = String(v);
+              if (/^(true|false)$/i.test(val)) val = val.toLowerCase() === 'true' ? 'True' : 'False';
+              existing.set(k, val);
             }
           }
           const newTuple = Array.from(existing.entries()).map(([k,v]) => `${k}=${v}`).join(',');
