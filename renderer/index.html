@@ -216,6 +216,15 @@
               </div>
             </div>
             <canvas id="statsChart" height="52" style="margin-top:10px; width:100%"></canvas>
+            <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
+              <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px; padding:0 2px;">
+                <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">👥 Players</span>
+                <span id="playerCount" style="font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-dim)"></span>
+              </div>
+              <div class="player-list" id="playerList">
+                <div class="empty-msg-sm" style="padding:8px 0">No players online</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -240,18 +249,6 @@
           </div>
         </div>
 
-        <div class="card" id="playersCard">
-          <div class="card-header collapsible" onclick="toggleCard('playersCard')">
-            👥 &nbsp;Players
-            <span id="playerCount" style="font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-dim)"></span>
-            <span class="card-chevron" style="margin-left:auto">▾</span>
-          </div>
-          <div class="card-body" style="padding:0">
-            <div class="player-list" id="playerList">
-              <div class="empty-msg-sm" style="padding:12px">No server selected</div>
-            </div>
-          </div>
-        </div>
 
         <div class="card" id="notesCard">
           <div class="card-header collapsible" onclick="toggleCard('notesCard')">📝 &nbsp;Server Notes <span class="card-chevron">▸</span></div>
