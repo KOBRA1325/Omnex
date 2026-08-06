@@ -4044,7 +4044,7 @@ function startLogTailer(serverId, server) {
             // Filter out overly noisy Unreal frame-timing lines
             if (/LogRHI:|LogSlate:|LogEditor:|LogInit:.*OS: Windows/.test(line)) continue;
             // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
-            if (/RCON executed the command\.?\s*ShowPlayers/i.test(line)) continue;
+            if (/executed the command\.?\s*ShowPlayers/i.test(line)) continue;
             log(serverId, classifyLine(line), line);
           }
           position = stat.size;
@@ -4162,7 +4162,7 @@ async function startServerById(id) {
           return; // but don't show in console
         }
         // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
-        if (/RCON executed the command\.?\s*ShowPlayers/i.test(l)) return;
+        if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
         log(id, classifyLine(l), l);
         parsePlayerEvent(id, l);
       });
@@ -4173,7 +4173,7 @@ async function startServerById(id) {
           parsePlayerEvent(id, l);
           return;
         }
-        if (/RCON executed the command\.?\s*ShowPlayers/i.test(l)) return;
+        if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
         log(id, 'warn', l);
         parsePlayerEvent(id, l);
       });
