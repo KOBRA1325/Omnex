@@ -2194,17 +2194,28 @@ async function createBackup(serverId, label = 'Manual backup', trigger = 'manual
 
   log(serverId, 'info', `Creating backup: ${label}...`);
 
-  // Determine what to back up — world data and configs only, not binaries
-  const foldersToBackup = ['world', 'world_nether', 'world_the_end', 'saves', 'config', 'mods', 'plugins'];
+  // Determine what to back up — save data and configs only, NOT binaries or game
+  // content. Per-game save/config folders (relative to installDir); Minecraft
+  // defaults otherwise. Without these, a game's save folder isn't matched and we
+  // fall back to copying the whole (multi-GB) install — slow and wrong.
+  const GAME_BACKUP_FOLDERS = {
+    'Palworld':    ['Pal/Saved/SaveGames', 'Pal/Saved/Config'],
+    'V Rising':    ['save-data'],
+    'Enshrouded':  ['savegame'],
+    '7 Days to Die': ['Saves'],
+  };
+  const foldersToBackup = GAME_BACKUP_FOLDERS[server.game] ||
+    ['world', 'world_nether', 'world_the_end', 'saves', 'config', 'mods', 'plugins'];
   const filesToBackup   = ['server.properties', 'ops.json', 'whitelist.json', 'banned-players.json', 'banned-ips.json'];
 
   let backedUp = 0;
 
-  // Copy relevant folders
+  // Copy relevant folders (handles nested paths like Pal/Saved/SaveGames)
   for (const folder of foldersToBackup) {
     const src = path.join(server.installDir, folder);
     if (fs.existsSync(src)) {
       const dest = path.join(backupDir, folder);
+      fs.mkdirSync(path.dirname(dest), { recursive: true }); // ensure parent dirs exist
       fs.cpSync(src, dest, { recursive: true });
       backedUp++;
       log(serverId, 'dim', `  Backed up: ${folder}/`);
