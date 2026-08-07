@@ -4522,11 +4522,28 @@ function runScheduledShutdown(serverId, action, warnMinutes, backupBeforeRestart
   }, lead * 60000);
 }
 
+// A task's warnings should fire BEFORE its scheduled time so the action lands
+// exactly at that time. So we start the countdown `lead` minutes early, where
+// lead is the largest warning offset (0 if there are no warnings).
+function scheduleTriggersNow(sched, now) {
+  const warns = (sched.warnMinutes || []).map(n => parseInt(n, 10)).filter(n => Number.isFinite(n) && n > 0);
+  const lead = ((sched.action === 'restart' || sched.action === 'stop') && warns.length) ? Math.max(...warns) : 0;
+  if (sched.freq === 'Daily') {
+    if (!sched.time) return false;
+    const [h, m] = sched.time.split(':').map(Number);
+    const trigger = ((((h * 60 + m) - lead) % 1440) + 1440) % 1440; // minutes into the day, wrapped
+    return (now.getHours() * 60 + now.getMinutes()) === trigger;
+  }
+  if (sched.freq === 'Hourly') {
+    return now.getMinutes() === (((0 - lead) % 60) + 60) % 60; // action at :00, start `lead` before
+  }
+  return false;
+}
+
 setInterval(() => {
-  const now=new Date(), hhmm=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const now = new Date();
   appData.schedules.filter(s=>s.active).forEach(async sched => {
-    let run = (sched.freq==='Daily'&&sched.time===hhmm)||(sched.freq==='Hourly'&&now.getMinutes()===0);
-    if (!run||!sched.serverId) return;
+    if (!sched.serverId || !scheduleTriggersNow(sched, now)) return;
     log(sched.serverId,'warn',`[Scheduler] ${sched.label}`);
     if (sched.action==='restart' || sched.action==='stop') {
       runScheduledShutdown(sched.serverId, sched.action, sched.warnMinutes, sched.backupBeforeRestart);
