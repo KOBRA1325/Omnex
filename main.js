@@ -2261,6 +2261,9 @@ async function createBackup(serverId, label = 'Manual backup', trigger = 'manual
       ],
     });
   }
+  // Notify the UI so the Backups list refreshes for any backup path
+  // (manual, auto, scheduled, or backup-before-restart).
+  emit('backup-created', { serverId });
   return { id: backupId, size, label };
 }
 
@@ -2352,8 +2355,7 @@ setInterval(async () => {
     if (bs.interval === '6hours' && now.getHours() % 6 === 0 && now.getMinutes() === 0) shouldRun = true;
     if (shouldRun) {
       try {
-        await createBackup(server.id, `Auto backup (${bs.interval})`, 'auto');
-        emit('backup-created', { serverId: server.id });
+        await createBackup(server.id, `Auto backup (${bs.interval})`, 'auto'); // emits backup-created itself
       } catch(e) { console.error('Auto-backup failed:', e.message); }
     }
   }

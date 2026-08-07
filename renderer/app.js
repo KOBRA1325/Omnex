@@ -1244,7 +1244,8 @@ function renderBackupCardWithData(s, backups, settings) {
 async function createManualBackup() {
   const s = getActive(); if(!s) return;
   showToast('💾','Creating backup...');
-  try { await window.nexus.createBackup(s.id,'Manual Backup'); renderBackupCard(); showToast('✅','Backup created'); }
+  // Refresh + success toast come from the 'backup-created' event (fires for every backup path).
+  try { await window.nexus.createBackup(s.id,'Manual Backup'); }
   catch(e) { showToast('❌',e.message); }
 }
 async function toggleAutoBackup(btn) {
@@ -2360,6 +2361,7 @@ function wireEvents(){
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
   window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });
   window.nexus.onUpdateStatus(d=>handleUpdateStatus(d));
+  window.nexus.onBackupCreated(({serverId})=>{ if(serverId===activeId){ renderBackupCard(); showToast('💾','Backup created'); } });
   try {
     window.nexus.onSteamQrCode(({ url }) => {
       showSteamQrCode(url);
