@@ -4160,6 +4160,9 @@ async function startServerById(id) {
     // find and clean up this process instead of leaving it orphaned and joinable.
     server.pid = proc.pid;
     saveData();
+    // Tell the UI it's online so any start path updates the status — including
+    // scheduler-driven restarts, which don't go through the renderer's Start button.
+    setStatus(id, 'online');
     log(id, 'success', `✔ Process spawned (PID: ${proc.pid})`);
     notify('start', {
       title: `▶ ${server.name} started`,
