@@ -2335,7 +2335,7 @@ async function init(){
 function wireEvents(){
   ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
-  window.nexus.onServerStatus(({serverId,status})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status=status;if(serverId===activeId)renderHeader();renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
+  window.nexus.onServerStatus(({serverId,status})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status=status;if(serverId===activeId){renderHeader();if(status==='online'){uptimeSec=0;startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='offline';if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
   window.nexus.onServerAdded(server=>{
     servers.push({...server,status:server.status||'installing'});
