@@ -4274,9 +4274,18 @@ async function startServerById(id) {
 ipcMain.handle('start-server', async (e, id) => startServerById(id));
 
 ipcMain.handle('stop-server',   async (e,id) => killServer(id));
-ipcMain.handle('send-command',  (e,{id,command}) => {
+ipcMain.handle('send-command',  async (e,{id,command}) => {
+  const server = appData.servers.find(s => s.id === id);
   const proc = serverProcesses[id];
   if (!proc) return { ok:false, error:'Not running' };
+  // Palworld doesn't read stdin — route console commands through RCON and echo
+  // the response (e.g. Info, ShowPlayers, Save, Broadcast <msg>).
+  if (server && server.game === 'Palworld' && server.rconPassword) {
+    const res = await rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, command);
+    if (res === null) return { ok:false, error:'RCON command failed (is RCON up? restart the server once)' };
+    log(id, 'dim', `[RCON] ${String(res).trim() || '(ok)'}`);
+    return { ok:true };
+  }
   try { proc.stdin.write(command+'\n'); return { ok:true }; } catch(e) { return { ok:false, error:e.message }; }
 });
 

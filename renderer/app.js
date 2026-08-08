@@ -839,10 +839,14 @@ function startStatsPolling() {
     try { const stats = await window.nexus.getStats(); renderStats(stats); } catch(e) {}
   }, 2000);
 }
+let uptimeStart = 0;
 function startUptimeCounter() {
   clearInterval(uptimeInterval);
+  // Anchor to a wall-clock start so uptime stays accurate even when the window
+  // is backgrounded and the timer is throttled (it recomputes from real time).
+  uptimeStart = Date.now() - (uptimeSec || 0) * 1000;
   uptimeInterval = setInterval(() => {
-    uptimeSec++;
+    uptimeSec = Math.floor((Date.now() - uptimeStart) / 1000);
     const el = document.getElementById('statUptime'); if(el) el.textContent = formatUptime(uptimeSec);
   }, 1000);
 }
@@ -915,12 +919,19 @@ async function updateCurrentServer() {
   showToast('🔄', 'Update started...');
 }
 async function sendCommand() {
-  const s = getActive(); if (!s || s.status !== 'online') return;
-  const inp = document.getElementById('cmdInput'); if (!inp) return;
+  const s = getActive(); if (!s) return;
+  if (s.status !== 'online') { showToast('⚠️','Start the server first'); return; }
+  const inp = document.getElementById('consoleInput'); if (!inp) return;
   const cmd = inp.value.trim(); if (!cmd) return;
   appendLog('cmd', `> ${cmd}`);
-  await window.nexus.sendCommand(s.id, cmd);
   inp.value = '';
+  try {
+    const r = await window.nexus.sendCommand(s.id, cmd);
+    if (r && r.ok === false) showToast('❌', r.error || 'Command failed');
+  } catch(e) { showToast('❌', e.message); }
+}
+function handleCmd(e) {
+  if (e.key === 'Enter') { e.preventDefault(); sendCommand(); }
 }
 async function removeCurrentServer() {
   const s = getActive(); if (!s) return;
