@@ -4483,6 +4483,10 @@ function broadcastWarning(serverId, message) {
   log(serverId, 'warn', `[Broadcast] ${message}`);
   if (proc && serverAcceptsConsoleChat(server)) {
     try { proc.stdin.write(`say ${message}\n`); } catch(e) {}
+  } else if (proc && server?.game === 'Palworld' && server.rconPassword) {
+    // Palworld shows in-game warnings via RCON Broadcast. Its Broadcast splits on
+    // spaces (only the first word shows), so send with underscores.
+    rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, `Broadcast ${message.replace(/\s+/g, '_')}`).catch(() => {});
   }
   if (appSettings.discordEnabled && appSettings.discordWebhookUrl) {
     postDiscordWebhook(appSettings.discordWebhookUrl, {
