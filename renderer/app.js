@@ -1366,7 +1366,7 @@ async function openConfigModal() {
     const result = await window.nexus.readServerConfig(s.id);
     const arHtml = ''; // Skip auto-restart section in modal - lives in main dashboard already
     if (result.ok && result.type === 'minecraft') {
-      renderMinecraftConfig(body, result.props, arHtml, 'advanced');
+      renderMinecraftConfig(body, result.props, arHtml, 'full'); // 'full' so the modal shows every setting
       if (saveBtn) { saveBtn.style.display = ''; saveBtn.onclick = () => saveServerConfig(); }
     } else if (result.ok && result.type === 'steam' && result.defs) {
       // 'full' so the modal shows every setting (including basic ones like the
@@ -1483,6 +1483,9 @@ async function renderConfigCard() {
 
 function renderMinecraftConfig(card, props, arHtml, scope) {
   scope = scope || 'full'; // 'basic' for sidebar, 'full' for modal, 'advanced' for modal (non-basic)
+  // Basic panel has no Save button, so its fields must persist on edit.
+  const chgFn  = scope === 'basic' ? 'updateMcPropAndSave' : 'updateMcProp';
+  const boolFn = scope === 'basic' ? 'toggleMinecraftPropAndSave' : 'toggleMinecraftProp';
   const basicKeys = new Set(['motd','server-port','max-players']);
   const allGroups = [
     { label:'🌍 World', keys:['level-name','level-seed','gamemode','difficulty','max-players','spawn-protection'] },
@@ -1501,8 +1504,8 @@ function renderMinecraftConfig(card, props, arHtml, scope) {
     for (const key of g.keys) {
       const val = props[key]??''; const isBool = val==='true'||val==='false';
       html += `<div class="config-row"><div class="config-label">${key}</div>`;
-      if (isBool) html += `<button class="cfg-bool-btn ${val==='true'?'on':''}" onclick="toggleMinecraftProp('${key}',this)"><span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${val}</span></button>`;
-      else html += `<input class="config-input" value="${escapeHtml(val)}" onchange="updateMcProp('${key}',this.value)">`;
+      if (isBool) html += `<button class="cfg-bool-btn ${val==='true'?'on':''}" onclick="${boolFn}('${key}',this)"><span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${val}</span></button>`;
+      else html += `<input class="config-input" value="${escapeHtml(val)}" onchange="${chgFn}('${key}',this.value)">`;
       html += '</div>';
     }
     html += '</div>';
@@ -1524,6 +1527,16 @@ function toggleMinecraftProp(key, btn) {
   const cur = window._mcProps[key]==='true'; window._mcProps[key]=String(!cur);
   btn.classList.toggle('on',!cur); btn.querySelector('.cfg-bool-val').textContent=String(!cur);
 }
+// Basic panel (sidebar) has no Save button — persist to server.properties on edit.
+async function saveMcNow() {
+  const s = getActive(); if(!s) return;
+  try {
+    const r = await window.nexus.writeServerConfig(s.id, window._mcProps||{});
+    showToast(r && r.ok ? '💾' : '❌', r && r.ok ? 'Saved — restart the server to apply.' : (r && r.error) || 'Save failed');
+  } catch(e) { showToast('❌', e.message); }
+}
+async function updateMcPropAndSave(key, val) { updateMcProp(key, val); await saveMcNow(); }
+function toggleMinecraftPropAndSave(key, btn) { toggleMinecraftProp(key, btn); saveMcNow(); }
 async function saveServerConfig() {
   const s = getActive(); if(!s) return;
   try { const r = await window.nexus.writeServerConfig(s.id, window._mcProps||{}); showToast(r.ok?'💾':'❌',r.ok?'Config saved!':r.error||'Save failed'); }
