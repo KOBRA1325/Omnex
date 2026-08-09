@@ -550,7 +550,15 @@ ipcMain.on('window-maximize', () => mainWindow?.isMaximized() ? mainWindow.unmax
 ipcMain.on('window-close',    () => mainWindow?.close());
 
 // ── Server data ───────────────────────────────────────────────────────────────
-ipcMain.handle('get-servers',   () => appData.servers.map(s => ({...s, status: serverProcesses[s.id]?'online':'offline'})));
+ipcMain.handle('get-servers',   () => appData.servers.map(s => {
+  // Backfill a missing Minecraft executable (e.g. Fabric/Paper servers imported
+  // before jar auto-detection) so Start isn't stuck disabled.
+  if (s.game === 'Minecraft' && !s.execPath && s.installDir) {
+    const jar = findMinecraftJar(s.installDir);
+    if (jar) { s.execPath = jar; saveData(); }
+  }
+  return { ...s, status: serverProcesses[s.id] ? 'online' : 'offline' };
+}));
 ipcMain.handle('get-schedules', () => appData.schedules);
 ipcMain.handle('get-app-version', () => APP_VERSION);
 
@@ -1255,6 +1263,27 @@ async function installMinecraft(serverId, installDir, config) {
   if (!fs.existsSync(eulaPath)) fs.writeFileSync(eulaPath,'eula=true\n');
   const propsPath = path.join(installDir,'server.properties');
   if (!fs.existsSync(propsPath)) fs.writeFileSync(propsPath, [`server-port=${config.port||25565}`,'gamemode=survival','difficulty=normal','max-players=20','online-mode=true',`motd=${config.name||'My Minecraft Server'}`].join('\n')+'\n');
+}
+
+// Find a runnable Minecraft server jar in a folder — handles vanilla (server.jar),
+// Fabric (fabric-server-launch.jar), Paper/Purpur/Spigot, Forge, and custom names.
+// Fabric's launcher is preferred over a bare server.jar (which is the vanilla jar
+// Fabric loads, not the one you run).
+function findMinecraftJar(dir) {
+  if (!dir || !fs.existsSync(dir)) return '';
+  for (const name of ['fabric-server-launch.jar', 'server.jar', 'minecraft_server.jar']) {
+    const p = path.join(dir, name);
+    if (fs.existsSync(p)) return p;
+  }
+  let jars = [];
+  try { jars = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.jar')); } catch(e) { return ''; }
+  jars = jars.filter(j => !/(installer|sources|javadoc)/i.test(j)); // skip non-runnable jars
+  const patterns = [/^fabric-server/i, /^paper[-.]/i, /^purpur[-.]/i, /^spigot[-.]/i, /^craftbukkit[-.]/i, /^forge[-.]/i, /server/i];
+  for (const re of patterns) {
+    const m = jars.find(j => re.test(j));
+    if (m) return path.join(dir, m);
+  }
+  return jars.length === 1 ? path.join(dir, jars[0]) : '';
 }
 
 async function installVanilla(serverId, installDir, version) {
@@ -3115,10 +3144,7 @@ ipcMain.handle('import-server', async (e, config) => {
     // Locate the executable inside the copy.
     let execPath = '';
     if (def?.startExe) execPath = findExe(installDir, def.startExe) || '';
-    if (game === 'Minecraft') {
-      const jar = path.join(installDir, 'server.jar');
-      if (fs.existsSync(jar)) execPath = jar;
-    }
+    if (game === 'Minecraft') execPath = findMinecraftJar(installDir) || execPath;
     server.execPath = execPath;
     server.status   = 'offline';
     saveData();
