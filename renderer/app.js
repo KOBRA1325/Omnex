@@ -844,13 +844,18 @@ function startStatsPolling() {
 let uptimeStart = 0;
 function startUptimeCounter() {
   clearInterval(uptimeInterval);
-  // Anchor to a wall-clock start so uptime stays accurate even when the window
-  // is backgrounded and the timer is throttled (it recomputes from real time).
-  uptimeStart = Date.now() - (uptimeSec || 0) * 1000;
-  uptimeInterval = setInterval(() => {
+  // Anchor to the active server's real start time (from the main process) so
+  // uptime reflects that specific server and survives switching views — it only
+  // resets when the server itself is actually (re)started. Falls back to "now"
+  // if we don't have a start time yet.
+  const s = servers.find(sv => sv.id === activeId);
+  uptimeStart = (s && s.startedAt) ? s.startedAt : Date.now();
+  const tick = () => {
     uptimeSec = Math.floor((Date.now() - uptimeStart) / 1000);
     const el = document.getElementById('statUptime'); if(el) el.textContent = formatUptime(uptimeSec);
-  }, 1000);
+  };
+  tick(); // paint immediately so switching servers shows the right value at once
+  uptimeInterval = setInterval(tick, 1000);
 }
 function renderStats(stats) {
   const cpu = document.getElementById('statCpu');
@@ -2361,8 +2366,8 @@ async function init(){
 function wireEvents(){
   ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
-  window.nexus.onServerStatus(({serverId,status})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status=status;if(serverId===activeId){renderHeader();if(status==='online'){uptimeSec=0;startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
-  window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='offline';if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
+  window.nexus.onServerStatus(({serverId,status,startedAt})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status=status;s.startedAt=(status==='online')?(startedAt||s.startedAt||Date.now()):null;}if(serverId===activeId){renderHeader();if(status==='online'){startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
+  window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status='offline';s.startedAt=null;}if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
   window.nexus.onServerAdded(server=>{
     servers.push({...server,status:server.status||'installing'});
     renderSidebar();

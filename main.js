@@ -466,7 +466,17 @@ app.on('window-all-closed', () => { if(process.platform!=='darwin') app.quit(); 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function emit(ch, data)          { mainWindow?.webContents.send(ch, data); }
 function log(id, type, text)     { emit('console-line', { serverId:id, type, text, ts:new Date().toLocaleTimeString('en-US',{hour12:false}) }); }
-function setStatus(id, status)   { const s=appData.servers.find(s=>s.id===id); if(s){s.status=status; saveData(); emit('server-status',{serverId:id,status});} }
+function setStatus(id, status)   {
+  const s=appData.servers.find(s=>s.id===id);
+  if(!s) return;
+  // Anchor uptime to the moment a server actually goes online, and clear it when
+  // it stops — so the renderer can show per-server uptime that survives view
+  // switches and only resets on a real (re)start.
+  if (status === 'online') { if (!s.startedAt) s.startedAt = Date.now(); }
+  else if (status === 'offline' || status === 'error') { s.startedAt = null; }
+  s.status=status; saveData();
+  emit('server-status',{serverId:id,status,startedAt:s.startedAt||null});
+}
 
 // ── App self-update (electron-updater with GitHub-link fallback) ───────────────
 // autoUpdater downloads latest.yml + the NSIS installer from the GitHub release
@@ -557,7 +567,8 @@ ipcMain.handle('get-servers',   () => appData.servers.map(s => {
     const jar = findMinecraftJar(s.installDir);
     if (jar) { s.execPath = jar; saveData(); }
   }
-  return { ...s, status: serverProcesses[s.id] ? 'online' : 'offline' };
+  const online = !!serverProcesses[s.id];
+  return { ...s, status: online ? 'online' : 'offline', startedAt: online ? (s.startedAt || null) : null };
 }));
 ipcMain.handle('get-schedules', () => appData.schedules);
 ipcMain.handle('get-app-version', () => APP_VERSION);
@@ -4292,7 +4303,7 @@ async function startServerById(id) {
       }
       // Clear player list + persisted PID on stop
       const stoppedSrv = appData.servers.find(s => s.id === id);
-      if (stoppedSrv) { stoppedSrv.players = []; stoppedSrv.pid = null; saveData(); }
+      if (stoppedSrv) { stoppedSrv.players = []; stoppedSrv.pid = null; stoppedSrv.startedAt = null; saveData(); }
       emit('players-updated', { serverId: id, players: [] });
       emit('server-stopped', { serverId:id, code });
       stopLogTailer(id);
@@ -4300,6 +4311,8 @@ async function startServerById(id) {
     });
     proc.on('error', err => {
       delete serverProcesses[id];
+      const es = appData.servers.find(s => s.id === id);
+      if (es) { es.startedAt = null; es.pid = null; saveData(); }
       log(id, 'error', `Failed to start process: ${err.message}`);
       if (err.code === 'ENOENT') log(id, 'warn', 'Executable not found - try reinstalling the server.');
       emit('server-stopped', { serverId:id, code:1 });
