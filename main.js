@@ -1271,19 +1271,26 @@ async function installMinecraft(serverId, installDir, config) {
 // Fabric loads, not the one you run).
 function findMinecraftJar(dir) {
   if (!dir || !fs.existsSync(dir)) return '';
-  for (const name of ['fabric-server-launch.jar', 'server.jar', 'minecraft_server.jar']) {
+  for (const name of ['fabric-server-launch.jar', 'quilt-server-launch.jar', 'server.jar', 'minecraft_server.jar']) {
     const p = path.join(dir, name);
     if (fs.existsSync(p)) return p;
   }
   let jars = [];
-  try { jars = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.jar')); } catch(e) { return ''; }
+  try { jars = fs.readdirSync(dir).filter(f => f.toLowerCase().endsWith('.jar')); } catch(e) { jars = []; }
   jars = jars.filter(j => !/(installer|sources|javadoc)/i.test(j)); // skip non-runnable jars
-  const patterns = [/^fabric-server/i, /^paper[-.]/i, /^purpur[-.]/i, /^spigot[-.]/i, /^craftbukkit[-.]/i, /^forge[-.]/i, /server/i];
+  const patterns = [/^fabric-server/i, /^quilt-server/i, /^paper[-.]/i, /^purpur[-.]/i, /^spigot[-.]/i, /^craftbukkit[-.]/i, /^forge[-.]/i, /server/i];
   for (const re of patterns) {
     const m = jars.find(j => re.test(j));
     if (m) return path.join(dir, m);
   }
-  return jars.length === 1 ? path.join(dir, jars[0]) : '';
+  if (jars.length === 1) return path.join(dir, jars[0]);
+  // Modern Forge / NeoForge (1.17+) have no runnable jar — they launch via a
+  // run script (run.bat/run.sh). Use that as the "executable" so Start works.
+  for (const s of ['run.bat', 'run.sh']) {
+    const p = path.join(dir, s);
+    if (fs.existsSync(p)) return p;
+  }
+  return '';
 }
 
 async function installVanilla(serverId, installDir, version) {
@@ -4134,6 +4141,8 @@ async function startServerById(id) {
 
   const def = GAME_DEFS[server.game];
   let exe, args;
+  let spawnEnv = null;      // custom env (used to put bundled Java on PATH for Forge run scripts)
+  let forceShell = false;   // run through a shell (used for .bat/.sh launch scripts)
 
   // Steam servers need the VC++ runtime to launch; ensure it's present before
   // starting (covers imported/copied servers that never ran through the installer).
@@ -4142,12 +4151,26 @@ async function startServerById(id) {
   }
 
   if (def?.type === 'minecraft' || def?.useJava) {
+    let javaExe;
     try {
-      exe = await ensureJava(id, server.mcVersion);
+      javaExe = await ensureJava(id, server.mcVersion);
     } catch(err) {
       return { ok:false, error:`Java setup failed: ${err.message}` };
     }
-    args = ['-Xmx2G','-Xms512M','-jar', server.execPath || path.join(server.installDir,'server.jar'), 'nogui'];
+    const mcExec = server.execPath || path.join(server.installDir, 'server.jar');
+    if (/\.(bat|cmd|sh)$/i.test(mcExec)) {
+      // Modern Forge / NeoForge (1.17+): no runnable jar — they launch via a
+      // run script that invokes `java` with @args files. Run the script itself,
+      // but put our bundled Java first on PATH so it doesn't need a system JDK.
+      exe = mcExec;
+      args = ['nogui'];
+      forceShell = true;
+      spawnEnv = { ...process.env, PATH: path.dirname(javaExe) + path.delimiter + (process.env.PATH || '') };
+      log(id, 'dim', `Forge/NeoForge launch script detected — using bundled Java`);
+    } else {
+      exe = javaExe;
+      args = ['-Xmx2G','-Xms512M','-jar', mcExec, 'nogui'];
+    }
   } else if (server.useShell) {
     exe  = server.execPath;
     args = [];
@@ -4180,7 +4203,9 @@ async function startServerById(id) {
   }
 
   try {
-    const proc = spawn(exe, args, { cwd:server.installDir, shell: !!server.useShell, windowsHide: true });
+    const spawnOpts = { cwd:server.installDir, shell: !!server.useShell || forceShell, windowsHide: true };
+    if (spawnEnv) spawnOpts.env = spawnEnv;
+    const proc = spawn(exe, args, spawnOpts);
     serverProcesses[id] = proc;
     // Persist the PID so a later Omnex session (after a restart/update/crash) can
     // find and clean up this process instead of leaving it orphaned and joinable.
