@@ -707,7 +707,9 @@ async function selectServer(id) {
   activeId = id; uptimeSec = 0;
   clearInterval(statsInterval); clearInterval(uptimeInterval);
   renderSidebar(); renderHeader();
-  appendLog('dim', '─'.repeat(55));
+  // Clear the console when switching servers so the previous server's output
+  // doesn't mix in and confuse things.
+  const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
   const s = servers.find(sv => sv.id === id);
   if (s) {
     appendLog('info', `Selected: ${s.name} [${s.game}] · Port ${s.port}`);
@@ -1761,7 +1763,7 @@ async function renderNetworkCard() {
 async function checkJavaStatus(id) {
   try {
     const result = await window.nexus.checkJava(id);
-    if (!result.ok) appendLog('warn', `Java not found. Omnex will download Java 21 automatically on first start.`);
+    if (!result.ok) appendLog('dim', `Java will be downloaded automatically the first time you start this server.`);
     else appendLog('dim', `Java: ${result.version||'detected'}`);
   } catch(e) {}
 }
