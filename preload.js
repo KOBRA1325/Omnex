@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('nexus', {
   getServers:    ()       => ipcRenderer.invoke('get-servers'),
   getConsole:    (id)     => ipcRenderer.invoke('get-console', id),
   clearConsole:  (id)     => ipcRenderer.invoke('clear-console', id),
+  getEventLog:   (id)     => ipcRenderer.invoke('get-event-log', id),
+  openEventLog:  (id)     => ipcRenderer.invoke('open-event-log', id),
+  clearEventLog: (id)     => ipcRenderer.invoke('clear-event-log', id),
   getSchedules:  ()       => ipcRenderer.invoke('get-schedules'),
   getAppVersion: ()       => ipcRenderer.invoke('get-app-version'),
   removeServer:  (id)     => ipcRenderer.invoke('remove-server', id),
@@ -55,6 +58,7 @@ contextBridge.exposeInMainWorld('nexus', {
   getNetworkInfo:      (port)                     => ipcRenderer.invoke('get-network-info', port),
 
   onConsoleLine:     (cb) => ipcRenderer.on('console-line',      (_, d) => cb(d)),
+  onEventLogged:     (cb) => ipcRenderer.on('event-logged',      (_, d) => cb(d)),
   onServerStopped:   (cb) => ipcRenderer.on('server-stopped',    (_, d) => cb(d)),
   onServerAdded:     (cb) => ipcRenderer.on('server-added',      (_, d) => cb(d)),
   onServerStatus:    (cb) => ipcRenderer.on('server-status',     (_, d) => cb(d)),

@@ -177,6 +177,7 @@
             <button class="console-search-close" onclick="closeConsoleSearch()">✕</button>
           </div>
           <button class="console-clear" onclick="toggleConsoleSearch()" title="Search (Ctrl+F)">🔍</button>
+          <button class="console-clear" onclick="openEventLogModal()" title="Event log: crashes, mass disconnects, CPU spikes">⚠ Events</button>
           <button class="console-clear" onclick="clearConsole()">Clear</button>
         </div>
         <div class="console-output" id="consoleOutput">
@@ -492,6 +493,26 @@
       <div class="log-file-content" id="logFileContent">
         <div class="empty-msg-sm">Select a log file to view</div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- EVENT LOG MODAL -->
+<div class="modal-overlay" id="eventLogModal">
+  <div class="modal modal-wide modal-tall">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>⚠ &nbsp;Event <span id="eventLogTitle">Log</span></span>
+      <div style="display:flex; gap:8px; align-items:center">
+        <button class="btn-modal-cancel" onclick="openEventLogFile()" title="Open the raw log file">📂 Open File</button>
+        <button class="btn-modal-cancel" onclick="clearEventLog()" title="Clear this server's event log">🗑 Clear</button>
+        <button class="btn-modal-cancel" onclick="closeEventLogModal()">✕ Close</button>
+      </div>
+    </div>
+    <div style="padding:6px 16px 0; color:var(--text-dim); font-size:11px">
+      Persistent record of crashes, mass disconnects, CPU spikes, and scheduled tasks — survives restarts.
+    </div>
+    <div class="log-file-content" id="eventLogContent" style="margin:12px 16px 16px; flex:1; overflow:auto">
+      <div class="empty-msg-sm">No events recorded yet.</div>
     </div>
   </div>
 </div>

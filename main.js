@@ -478,6 +478,83 @@ function log(id, type, text)     {
   }
   emit('console-line', { serverId:id, type, text, ts });
 }
+
+// ── Event Log ──────────────────────────────────────────────────────────────
+// A small, PERSISTENT per-server record of notable events — crashes, mass
+// disconnects, and system CPU spikes — so rare problems (like everyone getting
+// kicked once a day) can be diagnosed after the fact instead of guessing.
+const EVENT_LOG_DIR = path.join(USER_DATA, 'event-logs');
+const EVENT_LOG_MAX_BYTES = 512 * 1024; // ~500 KB per server, then trimmed from the front
+function eventLogPath(serverId) { return path.join(EVENT_LOG_DIR, `${serverId}.log`); }
+function logEvent(serverId, type, message) {
+  if (!serverId) return;
+  try {
+    fs.mkdirSync(EVENT_LOG_DIR, { recursive: true });
+    const ts = new Date().toLocaleString('en-US', { hour12: false });
+    const p  = eventLogPath(serverId);
+    fs.appendFileSync(p, `[${ts}] [${type}] ${message}\n`);
+    try {
+      if (fs.statSync(p).size > EVENT_LOG_MAX_BYTES) {
+        fs.writeFileSync(p, fs.readFileSync(p, 'utf8').split('\n').slice(-2000).join('\n'));
+      }
+    } catch (e) {}
+    emit('event-logged', { serverId, type, message, ts });
+  } catch (e) {}
+}
+
+// Mass-disconnect detection. Palworld is polled (compare counts each cycle);
+// Minecraft fires per-player leave events (count them within a short window).
+const _lastPlayerCount = {};
+function checkPlayerDrop(serverId, count) {
+  const prev = _lastPlayerCount[serverId];
+  _lastPlayerCount[serverId] = count;
+  if (prev == null || count >= prev) return;
+  const drop = prev - count;
+  // Everyone (or several players) vanishing at once while the server keeps
+  // running is the signature of a hang that timed players out.
+  if (count === 0 && prev >= 2) logEvent(serverId, 'MASS_DISCONNECT', `all ${prev} players dropped at once (${prev} → 0)`);
+  else if (drop >= 3)           logEvent(serverId, 'MASS_DISCONNECT', `${drop} players dropped at once (${prev} → ${count})`);
+}
+const _leaveWindow = {};
+function noteLeave(serverId) {
+  const now = Date.now();
+  const arr = (_leaveWindow[serverId] || []).filter(t => now - t < 10000);
+  arr.push(now);
+  _leaveWindow[serverId] = arr;
+  if (arr.length >= 3) { logEvent(serverId, 'MASS_DISCONNECT', `${arr.length} players left within 10s`); _leaveWindow[serverId] = []; }
+}
+
+// Background CPU-spike watcher. getStats reports SYSTEM-wide CPU, so a spike may
+// be another process starving the game server — on a spike we grab the top CPU
+// consumers so the log shows WHAT caused it. Hysteresis avoids repeat logging.
+let _cpuSpikeActive = false;
+const CPU_SPIKE_ON = 90, CPU_SPIKE_OFF = 75;
+setInterval(async () => {
+  const running = Object.keys(serverProcesses);
+  if (!running.length) { _cpuSpikeActive = false; return; }
+  let load = 0, memPct = 0;
+  try {
+    const si = require('systeminformation');
+    const [cpu, mem] = await Promise.all([si.currentLoad(), si.mem()]);
+    load = Math.round(cpu.currentLoad);
+    memPct = Math.round((mem.used / mem.total) * 100);
+  } catch (e) { return; }
+  if (load >= CPU_SPIKE_ON && !_cpuSpikeActive) {
+    _cpuSpikeActive = true;
+    let top = '';
+    try {
+      const si = require('systeminformation');
+      const procs = await si.processes();
+      const list = (procs.list || []).slice().sort((a, b) => b.cpu - a.cpu).slice(0, 3)
+        .map(p => `${p.name} ${Math.round(p.cpu)}%`);
+      if (list.length) top = ` — top: ${list.join(', ')}`;
+    } catch (e) {}
+    const msg = `system CPU ${load}%, RAM ${memPct}%${top}`;
+    for (const id of Object.keys(serverProcesses)) logEvent(id, 'CPU_SPIKE', msg);
+  } else if (load < CPU_SPIKE_OFF) {
+    _cpuSpikeActive = false;
+  }
+}, 8000);
 function setStatus(id, status)   {
   const s=appData.servers.find(s=>s.id===id);
   if(!s) return;
@@ -586,6 +663,20 @@ ipcMain.handle('get-servers',   () => appData.servers.map(s => {
 ipcMain.handle('get-console', (e, id) => consoleHistory[id] || []);
 // Clear a server's buffered console so "Clear console" stays cleared on switch-back.
 ipcMain.handle('clear-console', (e, id) => { if (id != null) consoleHistory[id] = []; return true; });
+// Event log: read (last 500 lines), open the file, or clear it.
+ipcMain.handle('get-event-log', (e, id) => {
+  try { return fs.readFileSync(eventLogPath(id), 'utf8').split('\n').filter(Boolean).slice(-500).join('\n'); }
+  catch { return ''; }
+});
+ipcMain.handle('open-event-log', (e, id) => {
+  try {
+    fs.mkdirSync(EVENT_LOG_DIR, { recursive: true });
+    const p = eventLogPath(id);
+    if (!fs.existsSync(p)) fs.writeFileSync(p, '');
+    shell.openPath(p); return true;
+  } catch { return false; }
+});
+ipcMain.handle('clear-event-log', (e, id) => { try { fs.writeFileSync(eventLogPath(id), ''); } catch(e){} return true; });
 ipcMain.handle('get-schedules', () => appData.schedules);
 ipcMain.handle('get-app-version', () => APP_VERSION);
 
@@ -606,6 +697,7 @@ ipcMain.handle('remove-server', async (e, id) => {
   }
   appData.servers = appData.servers.filter(s=>s.id!==id);
   delete consoleHistory[id];
+  try { fs.rmSync(eventLogPath(id), { force: true }); } catch(e) {}
   saveData(); return true;
 });
 
@@ -4242,6 +4334,7 @@ async function startServerById(id) {
     // Tell the UI it's online so any start path updates the status — including
     // scheduler-driven restarts, which don't go through the renderer's Start button.
     setStatus(id, 'online');
+    logEvent(id, 'START', `${server.name} started (PID ${proc.pid})`);
     log(id, 'success', `✔ Process spawned (PID: ${proc.pid})`);
     notify('start', {
       title: `▶ ${server.name} started`,
@@ -4284,11 +4377,13 @@ async function startServerById(id) {
     if (mainWindow) updateTaskbarBadge();
     proc.on('close', code => {
       delete serverProcesses[id];
+      delete _lastPlayerCount[id]; delete _leaveWindow[id];
       const uptime = Math.round((Date.now() - startTime) / 1000);
       const intentional = proc._omnexIntentionalStop;
       if (code !== 0 && code !== null && !intentional) {
         // Crash detection — distinguish crash from intentional stop
         const isCrash = uptime < 30; // ran for less than 30 seconds = likely crash
+        logEvent(id, 'CRASH', `exited with code ${code} after ${uptime}s`);
         log(id, 'error', `⚠ Server stopped unexpectedly (exit code ${code})`);
         if (isCrash) {
           log(id, 'error', `Server crashed after only ${uptime}s. Check the logs above for errors.`);
@@ -4309,6 +4404,7 @@ async function startServerById(id) {
         });
       } else {
         // Clean or intentional shutdown
+        logEvent(id, 'STOP', `stopped cleanly after ${uptime}s (code ${code == null ? 'n/a' : code})`);
         notify('stop', {
           title: `⏹ ${server.name} stopped`,
           body: `${server.name} has shut down.`,
@@ -4655,6 +4751,7 @@ setInterval(() => {
   appData.schedules.filter(s=>s.active).forEach(async sched => {
     if (!sched.serverId || !scheduleTriggersNow(sched, now)) return;
     log(sched.serverId,'warn',`[Scheduler] ${sched.label}`);
+    logEvent(sched.serverId, 'SCHEDULE', `${sched.action} — ${sched.label}`);
     if (sched.action==='restart' || sched.action==='stop') {
       runScheduledShutdown(sched.serverId, sched.action, sched.warnMinutes, sched.backupBeforeRestart);
     } else if (sched.action==='backup') {
@@ -4687,6 +4784,7 @@ async function pollPalworldPlayers(s) {
       return { name: (c[0] || '').trim(), steamId: (c[2] || '').trim() };
     }).filter(p => p.name && p.name.toLowerCase() !== 'name');
     s.players = players;
+    checkPlayerDrop(s.id, players.length);
     emit('players-updated', { serverId: s.id, players });
   } finally {
     _playerPollInFlight.delete(s.id);
@@ -4754,6 +4852,7 @@ function parsePlayerEvent(serverId, line) {
     const wasOnline = server.players.includes(name);
     server.players = server.players.filter(p => p !== name);
     if (wasOnline) {
+      noteLeave(serverId);
       notify('playerLeave', {
         title: `➖ ${name} left ${server.name}`,
         body: `${name} left the game. ${server.players.length} online.`,

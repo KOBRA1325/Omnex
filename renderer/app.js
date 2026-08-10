@@ -1833,6 +1833,44 @@ function classifyLogLine(l){const ll=l.toLowerCase();if(ll.includes('error')||ll
 function filterLogContent(q){document.querySelectorAll('.log-viewer-line').forEach(l=>{l.style.display=q.trim()&&!l.textContent.toLowerCase().includes(q.toLowerCase())?'none':''});}
 function closeLogModal(){hideModal('logModal');}
 
+// ── Event Log ─────────────────────────────────────────────────────────────────
+async function openEventLogModal() {
+  const s = getActive();
+  if (!s) { showToast('ℹ️', 'Select a server first'); return; }
+  const t = document.getElementById('eventLogTitle'); if (t) t.textContent = `Log · ${s.name}`;
+  showModal('eventLogModal');
+  await renderEventLog();
+}
+function closeEventLogModal(){ hideModal('eventLogModal'); }
+async function renderEventLog() {
+  const s = getActive(); if (!s) return;
+  const box = document.getElementById('eventLogContent'); if (!box) return;
+  let text = '';
+  try { text = await window.nexus.getEventLog(s.id); } catch(e) {}
+  const lines = (text || '').split('\n').filter(Boolean);
+  if (!lines.length) { box.innerHTML = '<div class="empty-msg-sm">No events recorded yet.</div>'; return; }
+  // Newest first, color-coded by event type.
+  const color = t =>
+    /CRASH|MASS_DISCONNECT/.test(t) ? 'error' :
+    /CPU_SPIKE/.test(t)             ? 'warn'  :
+    /START|SCHEDULE/.test(t)        ? 'info'  : 'dim';
+  box.innerHTML = lines.slice().reverse().map(l => {
+    const typeMatch = l.match(/\]\s*\[([A-Z_]+)\]/);
+    const cls = color(typeMatch ? typeMatch[1] : '');
+    return `<div class="log-viewer-line"><span class="log-${cls}">${escapeHtml(l)}</span></div>`;
+  }).join('');
+}
+async function openEventLogFile() {
+  const s = getActive(); if (!s) return;
+  try { await window.nexus.openEventLog(s.id); } catch(e) {}
+}
+async function clearEventLog() {
+  const s = getActive(); if (!s) return;
+  if (!confirm(`Clear the event log for "${s.name}"? This cannot be undone.`)) return;
+  try { await window.nexus.clearEventLog(s.id); } catch(e) {}
+  await renderEventLog();
+}
+
 // ── Mod Manager (Minecraft) ───────────────────────────────────────────────────
 async function openModManager(){
   const s=getActive(); if(!s) return;
@@ -2374,6 +2412,7 @@ async function init(){
 function wireEvents(){
   ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
+  window.nexus.onEventLogged(({serverId})=>{const m=document.getElementById('eventLogModal');if(serverId===activeId && m && m.classList.contains('open')) renderEventLog();});
   window.nexus.onServerStatus(({serverId,status,startedAt})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status=status;s.startedAt=(status==='online')?(startedAt||s.startedAt||Date.now()):null;}if(serverId===activeId){renderHeader();if(status==='online'){startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status='offline';s.startedAt=null;}if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
   window.nexus.onServerAdded(server=>{
