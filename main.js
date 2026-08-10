@@ -465,7 +465,19 @@ app.on('window-all-closed', () => { if(process.platform!=='darwin') app.quit(); 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function emit(ch, data)          { mainWindow?.webContents.send(ch, data); }
-function log(id, type, text)     { emit('console-line', { serverId:id, type, text, ts:new Date().toLocaleTimeString('en-US',{hour12:false}) }); }
+// Per-server Live Console history, so switching servers can replay only that
+// server's output instead of clearing the console. Capped as a ring buffer.
+const consoleHistory = {};
+const CONSOLE_HISTORY_MAX = 800;
+function log(id, type, text)     {
+  const ts = new Date().toLocaleTimeString('en-US',{hour12:false});
+  if (id != null) {
+    const buf = consoleHistory[id] || (consoleHistory[id] = []);
+    buf.push({ type, text, ts });
+    if (buf.length > CONSOLE_HISTORY_MAX) buf.splice(0, buf.length - CONSOLE_HISTORY_MAX);
+  }
+  emit('console-line', { serverId:id, type, text, ts });
+}
 function setStatus(id, status)   {
   const s=appData.servers.find(s=>s.id===id);
   if(!s) return;
@@ -570,6 +582,10 @@ ipcMain.handle('get-servers',   () => appData.servers.map(s => {
   const online = !!serverProcesses[s.id];
   return { ...s, status: online ? 'online' : 'offline', startedAt: online ? (s.startedAt || null) : null };
 }));
+// Replay a server's buffered console output (used when switching servers).
+ipcMain.handle('get-console', (e, id) => consoleHistory[id] || []);
+// Clear a server's buffered console so "Clear console" stays cleared on switch-back.
+ipcMain.handle('clear-console', (e, id) => { if (id != null) consoleHistory[id] = []; return true; });
 ipcMain.handle('get-schedules', () => appData.schedules);
 ipcMain.handle('get-app-version', () => APP_VERSION);
 
@@ -589,6 +605,7 @@ ipcMain.handle('remove-server', async (e, id) => {
     }
   }
   appData.servers = appData.servers.filter(s=>s.id!==id);
+  delete consoleHistory[id];
   saveData(); return true;
 });
 

@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('nexus', {
   openReleasePage: (url) => ipcRenderer.send('open-release-page', url),
 
   getServers:    ()       => ipcRenderer.invoke('get-servers'),
+  getConsole:    (id)     => ipcRenderer.invoke('get-console', id),
+  clearConsole:  (id)     => ipcRenderer.invoke('clear-console', id),
   getSchedules:  ()       => ipcRenderer.invoke('get-schedules'),
   getAppVersion: ()       => ipcRenderer.invoke('get-app-version'),
   removeServer:  (id)     => ipcRenderer.invoke('remove-server', id),

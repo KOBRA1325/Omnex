@@ -219,6 +219,8 @@ function _flushConsole() {
 }
 function clearConsole() {
   const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
+  _consoleBuf = [];
+  if (activeId) { try { window.nexus.clearConsole(activeId); } catch(e) {} }
   appendLog('dim', 'Console cleared.');
 }
 
@@ -707,12 +709,18 @@ async function selectServer(id) {
   activeId = id; uptimeSec = 0;
   clearInterval(statsInterval); clearInterval(uptimeInterval);
   renderSidebar(); renderHeader();
-  // Clear the console when switching servers so the previous server's output
-  // doesn't mix in and confuse things.
+  // Show only the selected server's console: clear the view, then replay THIS
+  // server's own buffered output so switching between servers keeps each one's
+  // history separate instead of wiping it.
   const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
+  _consoleBuf = []; // drop any pending lines queued from the previous server
   const s = servers.find(sv => sv.id === id);
-  if (s) {
-    appendLog('info', `Selected: ${s.name} [${s.game}] · Port ${s.port}`);
+  try {
+    const hist = await window.nexus.getConsole(id);
+    if (id === activeId && Array.isArray(hist)) hist.forEach(l => appendLog(l.type, l.text, l.ts));
+  } catch(e) {}
+  if (id === activeId && s) {
+    appendLog('dim', `— Viewing ${s.name} [${s.game}] · Port ${s.port} —`);
     if (s.game === 'Minecraft') checkJavaStatus(s.id);
   }
   try {
