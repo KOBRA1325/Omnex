@@ -4670,21 +4670,33 @@ setInterval(() => {
 // ── Live player list via RCON (Palworld) ────────────────────────────────────
 // Poll a Palworld server's online players (name + Steam ID) so the dashboard
 // shows the list and count without console parsing (which Palworld doesn't emit).
+const _playerPollInFlight = new Set(); // don't stack RCON calls on a slow/hung server
+const _playerPollSkip = {};            // serverId -> poll cycles to skip after a failure
 async function pollPalworldPlayers(s) {
   if (!s || s.game !== 'Palworld' || !serverProcesses[s.id] || !s.rconPassword) return;
-  const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
-  if (res === null) return;
-  // CSV: header line "name,playeruid,steamid" then one row per player.
-  const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
-  const players = rows.slice(1).map(r => {
-    const c = r.split(',');
-    return { name: (c[0] || '').trim(), steamId: (c[2] || '').trim() };
-  }).filter(p => p.name && p.name.toLowerCase() !== 'name');
-  s.players = players;
-  emit('players-updated', { serverId: s.id, players });
+  if (_playerPollInFlight.has(s.id)) return;                 // previous poll still running — skip
+  if (_playerPollSkip[s.id] > 0) { _playerPollSkip[s.id]--; return; } // backing off after a failure
+  _playerPollInFlight.add(s.id);
+  try {
+    const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
+    if (res === null) { _playerPollSkip[s.id] = 4; return; } // RCON struggling — ease off ~4 cycles
+    // CSV: header line "name,playeruid,steamid" then one row per player.
+    const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
+    const players = rows.slice(1).map(r => {
+      const c = r.split(',');
+      return { name: (c[0] || '').trim(), steamId: (c[2] || '').trim() };
+    }).filter(p => p.name && p.name.toLowerCase() !== 'name');
+    s.players = players;
+    emit('players-updated', { serverId: s.id, players });
+  } finally {
+    _playerPollInFlight.delete(s.id);
+  }
 }
 
-setInterval(() => { for (const s of appData.servers) pollPalworldPlayers(s); }, 20000);
+// Poll the player list every 45s (was 20s). Palworld's RCON is hitch-prone, so
+// less-frequent polling + the in-flight/backoff guards above keep Omnex from
+// adding to the server's CPU spikes.
+setInterval(() => { for (const s of appData.servers) pollPalworldPlayers(s); }, 45000);
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function findExe(dir, name) {
