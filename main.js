@@ -819,7 +819,13 @@ async function runInstall(id, server, config) {
   const def = GAME_DEFS[server.game];
   if (!def) throw new Error('Unknown game');
 
-  if (def.type === 'steam' || def.type === 'steam_auth') {
+  if (server.game === 'Terraria') {
+    // Fresh install from terraria.org (SteamCMD can't fetch Terraria anonymously).
+    await installTerraria(id, server.installDir, config);
+    server.execPath = path.join(server.installDir, 'TerrariaServer.exe');
+    server.args     = '';
+    syncServerConfig(id, server, /* isInstall */ true); // creates serverconfig.txt + world
+  } else if (def.type === 'steam' || def.type === 'steam_auth') {
     await ensureSteamCmd(id);
     // Provision the Visual C++ runtime that Steam servers need to launch.
     await ensureVCRedist(id);
@@ -1402,6 +1408,52 @@ function installViaSteamCmd(serverId, installDir, appId, gameName) {
 }
 
 // ── Minecraft install ─────────────────────────────────────────────────────────
+// Terraria isn't downloadable via anonymous SteamCMD (it needs a licensed
+// account), so fresh installs pull the official dedicated-server zip straight
+// from terraria.org — no Steam account required.
+const TERRARIA_SERVER_VERSION = '1449'; // 1.4.4.9 — bump when Terraria ships a new build
+function findTerrariaWindowsDir(root) {
+  // BFS a few levels for the folder containing TerrariaServer.exe (the zip nests
+  // it under <build>/Windows/).
+  const queue = [{ dir: root, d: 0 }];
+  while (queue.length) {
+    const { dir, d } = queue.shift();
+    if (fs.existsSync(path.join(dir, 'TerrariaServer.exe'))) return dir;
+    if (d >= 3) continue;
+    let subs = [];
+    try { subs = fs.readdirSync(dir, { withFileTypes: true }).filter(en => en.isDirectory()); } catch(e) {}
+    for (const s of subs) queue.push({ dir: path.join(dir, s.name), d: d + 1 });
+  }
+  return '';
+}
+async function installTerraria(serverId, installDir, config) {
+  const url = `https://terraria.org/api/download/pc-dedicated-server/terraria-server-${TERRARIA_SERVER_VERSION}.zip`;
+  const zipPath = path.join(installDir, 'terraria-server.zip');
+  log(serverId, 'info', `Downloading Terraria Dedicated Server (build ${TERRARIA_SERVER_VERSION}) from terraria.org...`);
+  await downloadFile(url, zipPath, pct => {
+    const filled = Math.floor(pct / 5);
+    const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+    emit('console-progress', { serverId, text: `⬇  Terraria Server  [${bar}] ${pct}%` });
+  });
+  log(serverId, 'info', 'Extracting Terraria server...');
+  const tmp = path.join(installDir, '_extract');
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch(e) {}
+  await extractZip(zipPath, tmp);
+  // The archive nests the server under <build>/Windows/ — hoist that folder's
+  // contents up so the server runs directly from installDir.
+  const winDir = findTerrariaWindowsDir(tmp);
+  if (!winDir) throw new Error('TerrariaServer.exe not found in the downloaded package');
+  for (const entry of fs.readdirSync(winDir)) {
+    fs.cpSync(path.join(winDir, entry), path.join(installDir, entry), { recursive: true });
+  }
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch(e) {}
+  try { fs.rmSync(zipPath, { force: true }); } catch(e) {}
+  if (!fs.existsSync(path.join(installDir, 'TerrariaServer.exe'))) {
+    throw new Error('TerrariaServer.exe missing after extraction');
+  }
+  log(serverId, 'success', '✔ Terraria Dedicated Server installed.');
+}
+
 async function installMinecraft(serverId, installDir, config) {
   const type    = config.mcType    || 'vanilla';
   const version = config.mcVersion || 'latest';

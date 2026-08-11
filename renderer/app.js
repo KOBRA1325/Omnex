@@ -1025,9 +1025,12 @@ function updateInstallInfo() {
   const isSteam = steamGames.includes(g.name);
   const existing = servers.filter(s => s.game === g.name);
   const countNote = existing.length > 0 ? ` You already have ${existing.length} ${g.name} server${existing.length>1?'s':''} — this will create a new one.` : '';  const el = document.getElementById('installInfoText'); if(!el) return;
-  el.textContent = (isSteam
-    ? `Omnex will download SteamCMD and install the ${g.name} dedicated server. No Steam account required.`
-    : `Omnex will download the latest ${g.name} server JAR and configure it automatically.`) + countNote;
+  const info = g.name === 'Terraria'
+    ? `Omnex will download the official Terraria Dedicated Server from terraria.org and configure it automatically. No Steam account required.`
+    : (isSteam
+      ? `Omnex will download SteamCMD and install the ${g.name} dedicated server. No Steam account required.`
+      : `Omnex will download the latest ${g.name} server JAR and configure it automatically.`);
+  el.textContent = info + countNote;
   document.getElementById('installInfo').style.borderColor='';
   document.getElementById('installInfo').style.background='';
 }
