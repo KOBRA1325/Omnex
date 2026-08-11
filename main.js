@@ -291,7 +291,7 @@ const GAME_DEFS = {
   'Project Zomboid': { type:'steam', serverAppId:'380870', startExe:'ProjectZomboidServer.bat', startArgs:(d,s)=>['-port',String(s.port||16261)] },
   'Ark: Survival':   { type:'steam', serverAppId:'376030', startExe:'ShooterGameServer.exe',    startArgs:(d,s)=>[`TheIsland?listen?Port=${s.port||7777}?MaxPlayers=20`,'-server','-log'] },
   'V Rising':        { type:'steam', serverAppId:'1829350',startExe:'VRisingServer.exe',        startArgs:(d,s)=>['-persistentDataPath','./save-data','-serverName',s.name||'My V Rising Server','-port',String(s.port||9876)] },
-  'Terraria':        { type:'steam', serverAppId:'105600', startExe:'TerrariaServer.exe',       startArgs:(d,s)=>['-port',String(s.port||7777),'-maxplayers','8'] },
+  'Terraria':        { type:'steam', serverAppId:'105600', startExe:'TerrariaServer.exe',       startArgs:(d,s)=>['-config', path.join(d,'serverconfig.txt'), '-port', String(s.port||7777)] },
   '7 Days to Die':   { type:'steam', serverAppId:'294420', startExe:'7DaysToDieServer.exe',     startArgs:(d,s)=>[] },
   'Palworld':        { type:'steam', serverAppId:'2394010',startExe:'PalServer-Win64-Shipping-Cmd.exe', startArgs:(d,s)=>{
     const args = ['-port='+(s.port||8211),'-publicport='+(s.port||8211),'-useperfthreads','-NoAsyncLoadingThread','-UseMultithreadForDS'];
@@ -1085,6 +1085,19 @@ const PALWORLD_DEFAULT_INI = `[/Script/Pal.PalGameWorldSettings]
 OptionSettings=(Difficulty=None,DayTimeSpeedRate=1.000000,NightTimeSpeedRate=1.000000,ExpRate=1.000000,PalCaptureRate=1.000000,PalSpawnNumRate=1.000000,PalDamageRateAttack=1.000000,PalDamageRateDefense=1.000000,PlayerDamageRateAttack=1.000000,PlayerDamageRateDefense=1.000000,PlayerStomachDecreaceRate=1.000000,PlayerStaminaDecreaceRate=1.000000,PlayerAutoHPRegeneRate=1.000000,PlayerAutoHpRegeneRateInSleep=1.000000,PalStomachDecreaceRate=1.000000,PalStaminaDecreaceRate=1.000000,PalAutoHPRegeneRate=1.000000,PalAutoHPRegeneRateInSleep=1.000000,BuildObjectDamageRate=1.000000,BuildObjectDeteriorationDamageRate=1.000000,CollectionDropRate=1.000000,CollectionObjectHpRate=1.000000,CollectionObjectRespawnSpeedRate=1.000000,EnemyDropItemRate=1.000000,DeathPenalty=All,bEnablePlayerToPlayerDamage=False,bEnableFriendlyFire=False,bEnableInvaderEnemy=True,bActiveUNKO=False,bEnableAimAssistPad=True,bEnableAimAssistKeyboard=False,DropItemMaxNum=3000,DropItemMaxNum_UNKO=100,BaseCampMaxNum=128,BaseCampWorkerMaxNum=15,DropItemAliveMaxHours=1.000000,bAutoResetGuildNoOnlinePlayers=False,AutoResetGuildTimeNoOnlinePlayers=72.000000,GuildPlayerMaxNum=20,PalEggDefaultHatchingTime=72.000000,WorkSpeedRate=1.000000,bIsMultiplay=False,bIsPvP=False,bHardcore=False,bCanPickupOtherGuildDeathPenaltyDrop=False,bEnableNonLoginPenalty=True,bEnableFastTravel=True,bIsStartLocationSelectByMap=True,bExistPlayerAfterLogout=False,bEnableDefenseOtherGuildPlayer=False,CoopPlayerMaxNum=4,ServerPlayerMaxNum=32,ServerName="My Palworld Server",ServerDescription="",AdminPassword="",ServerPassword="",PublicPort=8211,PublicIP="",RCONEnabled=False,RCONPort=25575,Region="",bUseAuth=True,BanListURL="https://api.palworldgame.com/api/banlist.txt",AutoSaveSpan=30.000000)
 `;
 
+// Find an existing Terraria world (.wld) inside an install so an imported server
+// reuses the player's world instead of auto-generating a blank one.
+function findTerrariaWorld(dir) {
+  for (const sub of ['Worlds', '.']) {
+    const d = path.join(dir, sub);
+    try {
+      const wld = fs.readdirSync(d).find(f => f.toLowerCase().endsWith('.wld'));
+      if (wld) return path.join(d, wld);
+    } catch (e) {}
+  }
+  return '';
+}
+
 // ── Server config sync: applies user's chosen name/port to per-game config files ──
 // Called on install (create configs) and start (in case user changed name/port).
 // Non-fatal - logs warnings if config file doesn't exist yet.
@@ -1192,7 +1205,42 @@ function syncServerConfig(serverId, server, isInstall = false) {
       // V Rising server name is set via launch arg -serverName (already in startArgs)
     }
 
-    // Valheim, Rust, CS2, Terraria: server name set via launch args, already handled
+    else if (server.game === 'Terraria') {
+      // Terraria's dedicated server drops into an interactive world-selection menu
+      // unless it's handed a config with a world + autocreate. Generate/patch
+      // serverconfig.txt so it starts headlessly — reusing an existing .wld on
+      // import, or auto-creating one on first run otherwise.
+      const cfgPath = path.join(server.installDir, 'serverconfig.txt');
+      const cfg = {};
+      if (fs.existsSync(cfgPath)) {
+        for (const line of fs.readFileSync(cfgPath, 'utf8').split(/\r?\n/)) {
+          if (line.trim().startsWith('#')) continue;
+          const m = line.match(/^\s*([A-Za-z_]+)\s*=\s*(.*)$/);
+          if (m) cfg[m[1].toLowerCase()] = m[2];
+        }
+      }
+      const worldDir = path.join(server.installDir, 'Worlds');
+      fs.mkdirSync(worldDir, { recursive: true });
+      // Prefer an existing world so we never overwrite an imported save.
+      let worldFile = (cfg.world && fs.existsSync(cfg.world)) ? cfg.world : findTerrariaWorld(server.installDir);
+      const worldName = cfg.worldname || (worldFile ? path.basename(worldFile, '.wld') : (sanitizeFolderName(gameName) || 'World'));
+      if (!worldFile) worldFile = path.join(worldDir, `${worldName}.wld`); // autocreated on first start
+      cfg.world      = worldFile;
+      cfg.worldname  = worldName;
+      cfg.worldpath  = worldDir;
+      cfg.autocreate = cfg.autocreate || '3';   // large world if none exists yet
+      cfg.difficulty = cfg.difficulty || '0';
+      cfg.maxplayers = cfg.maxplayers || '8';
+      cfg.secure     = cfg.secure     || '1';
+      cfg.language   = cfg.language   || 'en-US';
+      if (port) cfg.port = String(port);
+      if (cfg.motd == null) cfg.motd = gameName;
+      const out = Object.entries(cfg).map(([k, v]) => `${k}=${v}`).join('\r\n') + '\r\n';
+      fs.writeFileSync(cfgPath, out);
+      if (isInstall) log(serverId, 'success', `✔ serverconfig.txt configured (world="${worldName}", port=${cfg.port})`);
+    }
+
+    // Valheim, Rust, CS2: server name set via launch args, already handled
   } catch(err) {
     if (isInstall) log(serverId, 'warn', `Could not sync config for ${server.game}: ${err.message}`);
   }
@@ -4552,6 +4600,17 @@ async function killServer(id) {
         log(id, 'dim', 'Sent graceful shutdown via RCON — the community listing will clear quickly.');
         for (let i = 0; i < 8 && serverProcesses[id]; i++) await new Promise(r => setTimeout(r, 500)); // up to ~4s to exit
       }
+    } catch(e) {}
+    if (!serverProcesses[id]) { srv.pid = null; saveData(); return { ok:true }; }
+  }
+  // Terraria saves the world only on a clean "exit" command (stdin). Force-killing
+  // loses everything since the last autosave, so ask it to shut down gracefully first.
+  if (proc && srv && srv.game === 'Terraria') {
+    proc._omnexIntentionalStop = true;
+    try {
+      log(id, 'dim', 'Sending "exit" to Terraria to save the world and shut down cleanly...');
+      proc.stdin.write('exit\n');
+      for (let i = 0; i < 20 && serverProcesses[id]; i++) await new Promise(r => setTimeout(r, 500)); // up to ~10s to save+exit
     } catch(e) {}
     if (!serverProcesses[id]) { srv.pid = null; saveData(); return { ok:true }; }
   }
