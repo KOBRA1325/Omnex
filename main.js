@@ -559,9 +559,10 @@ function setStatus(id, status)   {
   const s=appData.servers.find(s=>s.id===id);
   if(!s) return;
   // Anchor uptime to the moment a server actually goes online, and clear it when
-  // it stops — so the renderer can show per-server uptime that survives view
-  // switches and only resets on a real (re)start.
-  if (status === 'online') { if (!s.startedAt) s.startedAt = Date.now(); }
+  // it stops — so the renderer shows per-server uptime that survives view switches
+  // but always restarts from 0 on a real (re)start. 'online' is only emitted once
+  // per launch (right after spawn), so resetting here can't zero a live timer.
+  if (status === 'online') { s.startedAt = Date.now(); }
   else if (status === 'offline' || status === 'error') { s.startedAt = null; }
   s.status=status; saveData();
   emit('server-status',{serverId:id,status,startedAt:s.startedAt||null});
@@ -4732,28 +4733,33 @@ function hardKill(id) {
 // the persisted PID AND its image name so a reused PID can never hit an
 // unrelated process.
 async function cleanupOrphanedServers() {
-  if (process.platform !== 'win32') return;
-  const withPid = appData.servers.filter(s => s.pid);
-  if (!withPid.length) return;
-  for (const s of withPid) {
-    const pid = s.pid;
-    const exe = s.execPath ? path.basename(s.execPath) : '';
-    s.pid = null; // clear the record regardless of outcome
-    if (!pid || !exe) continue;
-    const alive = await new Promise(res => {
-      let out = '';
-      const t = spawn('tasklist', ['/FI', `PID eq ${pid}`, '/FI', `IMAGENAME eq ${exe}`, '/NH', '/FO', 'CSV'], { windowsHide: true });
-      t.stdout.on('data', d => out += d.toString());
-      t.on('close', () => res(out.toLowerCase().includes(exe.toLowerCase())));
-      t.on('error', () => res(false));
-    });
-    if (alive) {
-      console.log(`[Omnex] Cleaning orphaned server "${s.name}" (pid ${pid}, ${exe}) left running from a previous session`);
-      await new Promise(res => {
-        const k = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
-        k.on('close', () => res());
-        k.on('error', () => res());
+  // A fresh launch has nothing running in-process yet, so any "online" status or
+  // uptime start-time left in the save file is stale (e.g. from a hard close or
+  // crash). Wipe it so uptime doesn't resume from an old timestamp and the timer
+  // only counts once a server is actually (re)started this session.
+  for (const s of appData.servers) { s.status = 'offline'; s.startedAt = null; }
+  if (process.platform === 'win32') {
+    const withPid = appData.servers.filter(s => s.pid);
+    for (const s of withPid) {
+      const pid = s.pid;
+      const exe = s.execPath ? path.basename(s.execPath) : '';
+      s.pid = null; // clear the record regardless of outcome
+      if (!pid || !exe) continue;
+      const alive = await new Promise(res => {
+        let out = '';
+        const t = spawn('tasklist', ['/FI', `PID eq ${pid}`, '/FI', `IMAGENAME eq ${exe}`, '/NH', '/FO', 'CSV'], { windowsHide: true });
+        t.stdout.on('data', d => out += d.toString());
+        t.on('close', () => res(out.toLowerCase().includes(exe.toLowerCase())));
+        t.on('error', () => res(false));
       });
+      if (alive) {
+        console.log(`[Omnex] Cleaning orphaned server "${s.name}" (pid ${pid}, ${exe}) left running from a previous session`);
+        await new Promise(res => {
+          const k = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+          k.on('close', () => res());
+          k.on('error', () => res());
+        });
+      }
     }
   }
   saveData();
