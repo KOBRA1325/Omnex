@@ -4319,7 +4319,13 @@ function startLogTailer(serverId, server) {
             if (/LogRHI:|LogSlate:|LogEditor:|LogInit:.*OS: Windows/.test(line)) continue;
             // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
             if (/executed the command\.?\s*ShowPlayers/i.test(line)) continue;
+            // Suppress the /list poll output (still parse it for names)
+            if (/There are \d+ of a max(imum)? of \d+ players online/i.test(line)) { parsePlayerEvent(serverId, line); continue; }
+            // Minecraft health/position poll replies: parse (health + map coords), don't show
+            if (parseMinecraftEntityData(serverId, line)) continue;
+            if (/^No entity was found$/i.test(line.replace(/^.*?\]:\s*/, '').trim())) continue;
             log(serverId, classifyLine(line), line);
+            parsePlayerEvent(serverId, line);
           }
           position = stat.size;
         });
