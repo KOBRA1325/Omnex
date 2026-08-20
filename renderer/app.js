@@ -199,7 +199,11 @@ function copyToClipboard(text) {
 // ── Console ───────────────────────────────────────────────────────────────────
 function appendLog(type, text, ts) {
   const time = ts || new Date().toLocaleTimeString('en-US', { hour12: false });
-  text.split('\n').filter(l => l.trim()).forEach(l => _consoleBuf.push({ type, text: l, time }));
+  const mc = getActive()?.game === 'Minecraft'; // chat tab only routes for Minecraft
+  text.split('\n').filter(l => l.trim()).forEach(l => {
+    _consoleBuf.push({ type, text: l, time });
+    if (mc) { const c = parseChatLine(l); if (c) appendChat(c.name, c.msg, time); }
+  });
   if (!_consoleRaf) _consoleRaf = requestAnimationFrame(_flushConsole);
 }
 function _flushConsole() {
@@ -222,6 +226,95 @@ function clearConsole() {
   _consoleBuf = [];
   if (activeId) { try { window.nexus.clearConsole(activeId); } catch(e) {} }
   appendLog('dim', 'Console cleared.');
+}
+
+// ── Server view tabs: Console · Chat · Map (Minecraft only) ────────────────────
+let currentServerTab = 'console';
+function switchServerTab(tab) {
+  currentServerTab = tab;
+  for (const t of ['console', 'chat', 'map']) {
+    const cap  = t.charAt(0).toUpperCase() + t.slice(1);
+    const view = document.getElementById('tab' + cap);
+    const btn  = document.getElementById('tabBtn' + cap);
+    if (view) view.style.display = (t === tab) ? 'flex' : 'none';
+    if (btn)  btn.classList.toggle('active', t === tab);
+  }
+  if (tab === 'map') renderMap();
+  if (tab === 'chat') { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
+}
+
+// Chat: detect "<Name> message" lines and mirror them into the Chat tab.
+function parseChatLine(text) {
+  const m = text.match(/<([A-Za-z0-9_]{1,16})>\s(.+)$/);
+  return m ? { name: m[1], msg: m[2] } : null;
+}
+function appendChat(name, msg, time) {
+  const out = document.getElementById('chatOutput'); if (!out) return;
+  const empty = out.querySelector('.empty-msg-sm'); if (empty) empty.remove();
+  const wasAtBottom = out.scrollHeight - out.scrollTop < out.clientHeight + 80;
+  const row = document.createElement('div'); row.className = 'chat-line';
+  row.innerHTML = `<span class="chat-ts">${time}</span><span class="chat-name">${escapeHtml(name)}</span><span class="chat-msg">${escapeHtml(msg)}</span>`;
+  out.appendChild(row);
+  const all = out.querySelectorAll('.chat-line');
+  if (all.length > 300) all[0].remove();
+  if (wasAtBottom || currentServerTab === 'chat') out.scrollTop = out.scrollHeight;
+}
+async function sendChat() {
+  const input = document.getElementById('chatInput'); if (!input) return;
+  const msg = input.value.trim(); if (!msg) return;
+  const s = getActive(); if (!s) return;
+  input.value = '';
+  try { await window.nexus.sendCommand(s.id, `say ${msg}`); } catch(e) {}
+}
+function handleChatKey(e) { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } }
+
+// Map: live top-down radar of player positions (x/z from the health/pos poll).
+function renderMap() {
+  const canvas = document.getElementById('mapCanvas');
+  const empty  = document.getElementById('mapEmpty');
+  if (!canvas) return;
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if (!w || !h) return;
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  // grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
+  for (let gx = 0; gx <= w; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke(); }
+  for (let gy = 0; gy <= h; gy += 40) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke(); }
+  const s = getActive();
+  const players = (s && Array.isArray(s.players))
+    ? s.players.filter(p => p && typeof p === 'object' && Number.isFinite(p.x) && Number.isFinite(p.z))
+    : [];
+  if (empty) empty.style.display = players.length ? 'none' : 'flex';
+  if (!players.length) return;
+  // bounds include spawn (0,0), with padding
+  const xs = players.map(p => p.x).concat(0), zs = players.map(p => p.z).concat(0);
+  let minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  const padX = Math.max((maxX - minX) * 0.15, 50), padZ = Math.max((maxZ - minZ) * 0.15, 50);
+  minX -= padX; maxX += padX; minZ -= padZ; maxZ += padZ;
+  const spanX = Math.max(maxX - minX, 1), spanZ = Math.max(maxZ - minZ, 1);
+  const margin = 30;
+  const scale = Math.min((w - 2 * margin) / spanX, (h - 2 * margin) / spanZ);
+  const offX = (w - spanX * scale) / 2, offY = (h - spanZ * scale) / 2;
+  const toX = x => offX + (x - minX) * scale;
+  const toY = z => offY + (z - minZ) * scale;
+  // spawn crosshair
+  const sx = toX(0), sy = toY(0);
+  ctx.strokeStyle = 'rgba(0,229,255,0.5)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(sx - 6, sy); ctx.lineTo(sx + 6, sy); ctx.moveTo(sx, sy - 6); ctx.lineTo(sx, sy + 6); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,229,255,0.6)'; ctx.font = '10px "Share Tech Mono", monospace';
+  ctx.fillText('0,0', sx + 8, sy + 3);
+  // players
+  players.forEach(p => {
+    const px = toX(p.x), py = toY(p.z);
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#3ecf5b'; ctx.fill();
+    ctx.strokeStyle = '#07090d'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#dfe8f0'; ctx.font = '11px "Rajdhani", sans-serif';
+    ctx.fillText(`${p.name} (${p.x}, ${p.z})`, px + 9, py + 4);
+  });
 }
 
 // ── Console search ────────────────────────────────────────────────────────────
@@ -715,6 +808,12 @@ async function selectServer(id) {
   const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
   _consoleBuf = []; // drop any pending lines queued from the previous server
   const s = servers.find(sv => sv.id === id);
+  // Tabs: only Minecraft servers get Chat + Map. Reset to Console and clear chat.
+  const tabs = document.getElementById('serverTabs');
+  if (tabs) tabs.style.display = (s && s.game === 'Minecraft') ? 'flex' : 'none';
+  switchServerTab('console');
+  const chatOut = document.getElementById('chatOutput');
+  if (chatOut) chatOut.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No chat yet.</div>';
   try {
     const hist = await window.nexus.getConsole(id);
     if (id === activeId && Array.isArray(hist)) hist.forEach(l => appendLog(l.type, l.text, l.ts));
@@ -1320,18 +1419,39 @@ async function saveNotes() {
 }
 
 // ── Players ───────────────────────────────────────────────────────────────────
+let playerTimerInterval = null;
+function formatSession(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h)  return `${h}h ${String(m).padStart(2,'0')}m`;
+  if (m)  return `${m}m ${String(sec).padStart(2,'0')}s`;
+  return `${sec}s`;
+}
+// Live-tick the "time online" fields without re-rendering the whole list.
+function updatePlayerSessions() {
+  document.querySelectorAll('.player-session[data-joined]').forEach(el => {
+    const j = parseInt(el.getAttribute('data-joined'), 10);
+    if (j) el.textContent = `⏱ ${formatSession(Date.now() - j)}`;
+  });
+}
 function renderPlayerList(players) {
   const list  = document.getElementById('playerList');
   const count = document.getElementById('playerCount');
   if (!list) return;
   if (!players) players = [];
   if(count) count.textContent = players.length>0 ? `${players.length} online` : '';
-  if (!players.length) { list.innerHTML='<div class="empty-msg-sm" style="padding:12px">No players online</div>'; return; }
+  clearInterval(playerTimerInterval); playerTimerInterval = null;
+  if (!players.length) {
+    list.innerHTML='<div class="empty-msg-sm" style="padding:12px">No players online</div>';
+    const st=document.getElementById('statPlayers'); if(st) st.textContent='0';
+    return;
+  }
   const s = getActive();
-  const isPalworld = !!(s && s.game === 'Palworld');
+  const isPalworld  = !!(s && s.game === 'Palworld');
+  const isMinecraft = !!(s && s.game === 'Minecraft');
   const jsStr = v => String(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); // safe for onclick string arg
   list.innerHTML = players.map(p => {
-    // Players are plain names (Minecraft) or { name, steamId } (Palworld).
+    // Players are plain names, { name, steamId } (Palworld), or { name, joinedAt, health } (Minecraft).
     const name = typeof p === 'string' ? p : (p.name || '');
     const id   = typeof p === 'string' ? p : (p.steamId || '');
     const nm = jsStr(name), pid = jsStr(id);
@@ -1348,14 +1468,33 @@ function renderPlayerList(players) {
         <button class="btn-player-action btn-kick" onclick="playerAction('kick','${nm}','${nm}')" title="Kick">⚡</button>
         <button class="btn-player-action btn-ban"  onclick="playerAction('ban','${nm}','${nm}')"  title="Ban">🚫</button>`;
     }
+    // Minecraft-only meta: live health bar + time online
+    let meta = '';
+    if (isMinecraft && typeof p === 'object') {
+      const parts = [];
+      if (p.health != null) {
+        const hp  = p.health;
+        const pct = Math.max(0, Math.min(100, (hp / 20) * 100));
+        const col = hp > 12 ? '#3ecf5b' : hp > 6 ? '#e8b84b' : '#e05a5a';
+        parts.push(`<span class="player-health" title="${hp} / 20 HP"><span class="hp-bar"><span class="hp-fill" style="width:${pct}%;background:${col}"></span></span>${hp}</span>`);
+      } else {
+        parts.push(`<span class="player-health player-health-dim" title="Waiting for health…">❤ —</span>`);
+      }
+      if (p.joinedAt) parts.push(`<span class="player-session" data-joined="${p.joinedAt}">⏱ ${formatSession(Date.now() - p.joinedAt)}</span>`);
+      meta = `<div class="player-meta">${parts.join('')}</div>`;
+    }
     return `
     <div class="player-item">
       <div class="player-avatar">👤</div>
-      <div class="player-name">${escapeHtml(name)}</div>
+      <div class="player-info">
+        <div class="player-name">${escapeHtml(name)}</div>
+        ${meta}
+      </div>
       <div class="player-actions">${actions}</div>
     </div>`;
   }).join('');
   const statEl = document.getElementById('statPlayers'); if(statEl) statEl.textContent = String(players.length);
+  if (isMinecraft) playerTimerInterval = setInterval(updatePlayerSessions, 1000);
 }
 async function playerAction(action, id, name) {
   const s = getActive(); if(!s) return;
@@ -2437,7 +2576,7 @@ function wireEvents(){
   });
   window.nexus.onInstallError(({serverId,error})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='error';if(serverId===activeId)renderHeader();showToast('❌',error||'Install failed');});
   window.nexus.onConsoleProgress(({serverId,text})=>{if(serverId!==activeId)return;const out=document.getElementById('consoleOutput');if(!out)return;let p=out.querySelector('.progress-line');if(!p){p=document.createElement('div');p.className='log-line progress-line';out.appendChild(p);}p.innerHTML=`<span class="log-ts">${new Date().toLocaleTimeString('en-US',{hour12:false})}</span><span class="log-info">${escapeHtml(text)}</span>`;out.scrollTop=out.scrollHeight;});
-  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';}});
+  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';if(currentServerTab==='map')renderMap();}});
   window.nexus.onSettingsChanged(settings=>{appSettings=settings;applySettingsToUI();if(settings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=settings.consoleFontSize+'px';}});
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
   window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });

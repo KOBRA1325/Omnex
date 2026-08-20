@@ -168,6 +168,12 @@
         <div class="console-topbar">
           <div class="console-title">Live Console</div>
           <div class="console-live-badge" id="liveBadge"><div class="live-dot"></div> LIVE</div>
+          <!-- Minecraft-only tab switcher (Console / Chat / Map) -->
+          <div class="server-tabs" id="serverTabs" style="display:none">
+            <button class="server-tab active" id="tabBtnConsole" onclick="switchServerTab('console')">Console</button>
+            <button class="server-tab" id="tabBtnChat" onclick="switchServerTab('chat')">Chat</button>
+            <button class="server-tab" id="tabBtnMap" onclick="switchServerTab('map')">Map</button>
+          </div>
           <div class="console-search-wrap" id="consoleSearchWrap" style="display:none">
             <input class="console-search-input" id="consoleSearchInput"
               placeholder="Search console..."
@@ -180,13 +186,37 @@
           <button class="console-clear" onclick="openEventLogModal()" title="Event log: crashes, mass disconnects, CPU spikes">⚠ Events</button>
           <button class="console-clear" onclick="clearConsole()">Clear</button>
         </div>
-        <div class="console-output" id="consoleOutput">
-          <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-dim">Omnex ready. Select or add a server to begin.</span></div>
+
+        <!-- Console tab -->
+        <div class="tab-view" id="tabConsole" style="display:flex">
+          <div class="console-output" id="consoleOutput">
+            <div class="log-line"><span class="log-ts">--:--:--</span><span class="log-dim">Omnex ready. Select or add a server to begin.</span></div>
+          </div>
+          <div class="console-input-row">
+            <div class="console-prompt">&gt;_</div>
+            <input class="console-input" id="consoleInput" placeholder="Send command to server..." onkeydown="handleCmd(event)" style="pointer-events:all;">
+            <button class="console-send" onclick="sendCommand()">Send</button>
+          </div>
         </div>
-        <div class="console-input-row">
-          <div class="console-prompt">&gt;_</div>
-          <input class="console-input" id="consoleInput" placeholder="Send command to server..." onkeydown="handleCmd(event)" style="pointer-events:all;">
-          <button class="console-send" onclick="sendCommand()">Send</button>
+
+        <!-- Chat tab (Minecraft) -->
+        <div class="tab-view" id="tabChat" style="display:none">
+          <div class="console-output chat-output" id="chatOutput">
+            <div class="empty-msg-sm" style="padding:12px">No chat yet.</div>
+          </div>
+          <div class="console-input-row">
+            <div class="console-prompt">💬</div>
+            <input class="console-input" id="chatInput" placeholder="Send a message to players (say)..." onkeydown="handleChatKey(event)" style="pointer-events:all;">
+            <button class="console-send" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+
+        <!-- Map tab (Minecraft): live top-down player radar -->
+        <div class="tab-view" id="tabMap" style="display:none">
+          <div id="mapCanvasWrap">
+            <canvas id="mapCanvas"></canvas>
+            <div class="map-empty" id="mapEmpty">Waiting for player positions…</div>
+          </div>
         </div>
       </div>
 

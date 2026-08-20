@@ -4459,6 +4459,9 @@ async function startServerById(id) {
         }
         // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
         if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
+        // Hide the Minecraft health/position poll replies (parse them, don't show)
+        if (parseMinecraftEntityData(id, l)) return;
+        if (/^No entity was found$/i.test(l.replace(/^.*?\]:\s*/, '').trim())) return;
         log(id, classifyLine(l), l);
         parsePlayerEvent(id, l);
       });
@@ -4939,6 +4942,9 @@ function classifyLine(t) {
 }
 
 // Parse player join/leave/list events from console output
+// Minecraft players are stored as objects { name, joinedAt, health } so the UI
+// can show session time + live health. Tolerates legacy plain-string entries.
+const mcPlayerName = p => (typeof p === 'string' ? p : (p && p.name) || '');
 function parsePlayerEvent(serverId, line) {
   const server = appData.servers.find(s => s.id === serverId);
   if (!server) return;
@@ -4950,8 +4956,8 @@ function parsePlayerEvent(serverId, line) {
                     line.match(/INFO\]: ([A-Za-z0-9_]+) joined the game/i);
   if (joinMatch) {
     const name = joinMatch[1];
-    if (!server.players.includes(name)) {
-      server.players.push(name);
+    if (!server.players.some(p => mcPlayerName(p) === name)) {
+      server.players.push({ name, joinedAt: Date.now(), health: null });
       notify('playerJoin', {
         title: `➕ ${name} joined ${server.name}`,
         body: `${name} joined the game. ${server.players.length} online.`,
@@ -4966,8 +4972,8 @@ function parsePlayerEvent(serverId, line) {
                      line.match(/INFO\]: ([A-Za-z0-9_]+) left the game/i);
   if (leaveMatch) {
     const name = leaveMatch[1];
-    const wasOnline = server.players.includes(name);
-    server.players = server.players.filter(p => p !== name);
+    const wasOnline = server.players.some(p => mcPlayerName(p) === name);
+    server.players = server.players.filter(p => mcPlayerName(p) !== name);
     if (wasOnline) {
       noteLeave(serverId);
       notify('playerLeave', {
@@ -4983,12 +4989,52 @@ function parsePlayerEvent(serverId, line) {
   const listMatch = line.match(/players online: (.+)$/i);
   if (listMatch && listMatch[1].trim() !== '') {
     const names = listMatch[1].split(',').map(n => n.trim()).filter(Boolean);
-    server.players = names;
+    server.players = names.map(nm => {
+      const existing = server.players.find(p => mcPlayerName(p) === nm);
+      return (existing && typeof existing === 'object') ? existing : { name: nm, joinedAt: Date.now(), health: null };
+    });
     emit('players-updated', { serverId, players: server.players });
   }
 }
 
-// Player list is maintained via join/leave console parsing (no polling needed)
+// Minecraft-only: parse a `data get entity <name> Health|Pos` reply and update
+// that player's health (0–20) or map position (x/z). Returns true if the line
+// was an entity-data reply (so the console handler can suppress it).
+function parseMinecraftEntityData(serverId, line) {
+  const m = line.match(/([A-Za-z0-9_]+) has the following entity data: (.+)$/);
+  if (!m) return false;
+  const name = m[1], val = m[2].trim();
+  const server = appData.servers.find(s => s.id === serverId);
+  const p = server?.players?.find(pl => pl && pl.name === name);
+  if (p && typeof p === 'object') {
+    const pos = val.match(/^\[\s*(-?[\d.]+)d?,\s*(-?[\d.]+)d?,\s*(-?[\d.]+)d?\s*\]$/);
+    if (pos) {
+      p.x = Math.round(parseFloat(pos[1]));
+      p.z = Math.round(parseFloat(pos[3]));
+      emit('players-updated', { serverId, players: server.players });
+    } else {
+      const hp = val.match(/^(-?[\d.]+)f?$/);
+      if (hp) { p.health = Math.round(parseFloat(hp[1]) * 10) / 10; emit('players-updated', { serverId, players: server.players }); }
+    }
+  }
+  return true;
+}
+
+// Poll online Minecraft players' health + position every 15s (Minecraft-only).
+setInterval(() => {
+  for (const s of appData.servers) {
+    if (GAME_DEFS[s.game]?.type !== 'minecraft') continue;
+    const proc = serverProcesses[s.id];
+    if (!proc || !Array.isArray(s.players) || !s.players.length) continue;
+    for (const p of s.players) {
+      const name = p && p.name; if (!name) continue;
+      try {
+        proc.stdin.write(`data get entity ${name} Health\n`);
+        proc.stdin.write(`data get entity ${name} Pos\n`);
+      } catch(e) {}
+    }
+  }
+}, 15000);
 
 function downloadFile(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
