@@ -211,11 +211,17 @@
           </div>
         </div>
 
-        <!-- Map tab (Minecraft): live top-down player radar -->
+        <!-- Map tab (Minecraft): zoomable/pannable player radar -->
         <div class="tab-view" id="tabMap" style="display:none">
           <div id="mapCanvasWrap">
             <canvas id="mapCanvas"></canvas>
-            <div class="map-empty" id="mapEmpty">Waiting for player positions…</div>
+            <div class="map-controls">
+              <button class="map-btn" onclick="mapZoomBy(1.2)" title="Zoom in">＋</button>
+              <button class="map-btn" onclick="mapZoomBy(0.8333)" title="Zoom out">－</button>
+              <button class="map-btn" onclick="recenterMap()" title="Recenter / fit">⌖</button>
+            </div>
+            <div class="map-empty" id="mapEmpty">No player positions recorded yet…</div>
+            <div class="map-hint">scroll to zoom · drag to pan</div>
           </div>
         </div>
       </div>

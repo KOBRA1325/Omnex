@@ -3321,6 +3321,7 @@ ipcMain.handle('get-server-bundle', async (e, id) => {
     stats,
     notes:          server.notes || '',
     players:        server.players || [],
+    mapPositions:   server.mapPositions || {},
   };
 });
 
@@ -5017,6 +5018,11 @@ function parseMinecraftEntityData(serverId, line) {
     if (pos) {
       p.x = Math.round(parseFloat(pos[1]));
       p.z = Math.round(parseFloat(pos[3]));
+      // Persist last-known position so the map can show players even after they
+      // log off (survives restarts). Keyed by player name.
+      if (!server.mapPositions) server.mapPositions = {};
+      server.mapPositions[name] = { x: p.x, z: p.z, ts: Date.now() };
+      saveData();
       emit('players-updated', { serverId, players: server.players });
     } else {
       const hp = val.match(/^(-?[\d.]+)f?$/);

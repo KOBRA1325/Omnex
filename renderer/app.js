@@ -239,7 +239,7 @@ function switchServerTab(tab) {
     if (view) view.style.display = (t === tab) ? 'flex' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   }
-  if (tab === 'map') renderMap();
+  if (tab === 'map') { initMapInteractions(); renderMap(); }
   if (tab === 'chat') { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
 }
 
@@ -268,7 +268,56 @@ async function sendChat() {
 }
 function handleChatKey(e) { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } }
 
-// Map: live top-down radar of player positions (x/z from the health/pos poll).
+// Map: zoomable/pannable top-down radar of player positions. Positions persist
+// (via mapCache, seeded from the server bundle), so players show even offline.
+let mapCache = {};                 // name -> { x, z, online }
+let mapZoom = 1, mapPanX = 0, mapPanY = 0;
+let _mapFit = null;                // stable base view { baseScale, wcx, wcz }; recomputed on recenter
+let _mapT = null;                  // last transform used (for cursor-anchored zoom)
+let _mapInteractionsInit = false;
+
+function seedMapCache(mapPositions) {
+  mapCache = {};
+  for (const [name, p] of Object.entries(mapPositions || {})) {
+    if (p && Number.isFinite(p.x) && Number.isFinite(p.z)) mapCache[name] = { x: p.x, z: p.z, online: false };
+  }
+  _mapFit = null; mapZoom = 1; mapPanX = 0; mapPanY = 0;
+}
+function updateMapCacheFromPlayers(players) {
+  const online = new Set();
+  (players || []).forEach(p => {
+    if (p && typeof p === 'object') {
+      online.add(p.name);
+      if (Number.isFinite(p.x) && Number.isFinite(p.z)) mapCache[p.name] = { x: p.x, z: p.z, online: true };
+    }
+  });
+  Object.keys(mapCache).forEach(n => { if (!online.has(n) && mapCache[n]) mapCache[n].online = false; });
+}
+function recenterMap() { _mapFit = null; mapZoom = 1; mapPanX = 0; mapPanY = 0; renderMap(); }
+function mapZoomBy(f) { mapZoom *= f; renderMap(); }
+function initMapInteractions() {
+  if (_mapInteractionsInit) return;
+  const canvas = document.getElementById('mapCanvas'); if (!canvas) return;
+  _mapInteractionsInit = true;
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    if (!_mapT || !_mapFit) { mapZoom *= factor; renderMap(); return; }
+    const { scale, wcx, wcz, w, h } = _mapT;
+    const wx = (e.offsetX - w / 2 - mapPanX) / scale + wcx;  // world point under cursor
+    const wz = (e.offsetY - h / 2 - mapPanY) / scale + wcz;
+    mapZoom *= factor;
+    const ns = _mapFit.baseScale * mapZoom;
+    mapPanX = e.offsetX - w / 2 - (wx - wcx) * ns;           // keep that point under cursor
+    mapPanY = e.offsetY - h / 2 - (wz - wcz) * ns;
+    renderMap();
+  }, { passive: false });
+  let dragging = false, lx = 0, ly = 0;
+  canvas.style.cursor = 'grab';
+  canvas.addEventListener('mousedown', e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.style.cursor = 'grabbing'; });
+  window.addEventListener('mousemove', e => { if (!dragging) return; mapPanX += e.clientX - lx; mapPanY += e.clientY - ly; lx = e.clientX; ly = e.clientY; renderMap(); });
+  window.addEventListener('mouseup', () => { if (dragging) { dragging = false; canvas.style.cursor = 'grab'; } });
+}
 function renderMap() {
   const canvas = document.getElementById('mapCanvas');
   const empty  = document.getElementById('mapEmpty');
@@ -279,41 +328,52 @@ function renderMap() {
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
-  // grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
-  for (let gx = 0; gx <= w; gx += 40) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke(); }
-  for (let gy = 0; gy <= h; gy += 40) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke(); }
-  const s = getActive();
-  const players = (s && Array.isArray(s.players))
-    ? s.players.filter(p => p && typeof p === 'object' && Number.isFinite(p.x) && Number.isFinite(p.z))
-    : [];
-  if (empty) empty.style.display = players.length ? 'none' : 'flex';
-  if (!players.length) return;
-  // bounds include spawn (0,0), with padding
-  const xs = players.map(p => p.x).concat(0), zs = players.map(p => p.z).concat(0);
-  let minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
-  const padX = Math.max((maxX - minX) * 0.15, 50), padZ = Math.max((maxZ - minZ) * 0.15, 50);
-  minX -= padX; maxX += padX; minZ -= padZ; maxZ += padZ;
-  const spanX = Math.max(maxX - minX, 1), spanZ = Math.max(maxZ - minZ, 1);
-  const margin = 30;
-  const scale = Math.min((w - 2 * margin) / spanX, (h - 2 * margin) / spanZ);
-  const offX = (w - spanX * scale) / 2, offY = (h - spanZ * scale) / 2;
-  const toX = x => offX + (x - minX) * scale;
-  const toY = z => offY + (z - minZ) * scale;
-  // spawn crosshair
+
+  const pts = Object.entries(mapCache).map(([name, p]) => ({ name, ...p }))
+    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.z));
+  if (empty) empty.style.display = pts.length ? 'none' : 'flex';
+
+  // Establish a stable base fit once (kept until Recenter), so the view doesn't
+  // jump as players move around.
+  if (!_mapFit) {
+    if (pts.length) {
+      const xs = pts.map(p => p.x).concat(0), zs = pts.map(p => p.z).concat(0);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+      const spanX = Math.max(maxX - minX, 64), spanZ = Math.max(maxZ - minZ, 64), margin = 40;
+      _mapFit = { baseScale: Math.min((w - 2 * margin) / spanX, (h - 2 * margin) / spanZ), wcx: (minX + maxX) / 2, wcz: (minZ + maxZ) / 2 };
+    } else {
+      _mapFit = { baseScale: Math.min(w, h) / 512, wcx: 0, wcz: 0 }; // default ~512-block view around 0,0
+    }
+  }
+  const scale = _mapFit.baseScale * mapZoom, wcx = _mapFit.wcx, wcz = _mapFit.wcz;
+  const toX = x => w / 2 + (x - wcx) * scale + mapPanX;
+  const toY = z => h / 2 + (z - wcz) * scale + mapPanY;
+  _mapT = { scale, wcx, wcz, w, h };
+
+  // grid — spacing in blocks, kept legible across zoom levels
+  let gridBlocks = 16;
+  while (gridBlocks * scale < 28) gridBlocks *= 4;
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+  const leftWX = wcx + (-w / 2 - mapPanX) / scale, rightWX = wcx + (w / 2 - mapPanX) / scale;
+  for (let gx = Math.floor(leftWX / gridBlocks) * gridBlocks; gx <= rightWX; gx += gridBlocks) { const px = toX(gx); ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, h); ctx.stroke(); }
+  const topWZ = wcz + (-h / 2 - mapPanY) / scale, botWZ = wcz + (h / 2 - mapPanY) / scale;
+  for (let gz = Math.floor(topWZ / gridBlocks) * gridBlocks; gz <= botWZ; gz += gridBlocks) { const py = toY(gz); ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke(); }
+
+  // 0,0 crosshair
   const sx = toX(0), sy = toY(0);
   ctx.strokeStyle = 'rgba(0,229,255,0.5)'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(sx - 6, sy); ctx.lineTo(sx + 6, sy); ctx.moveTo(sx, sy - 6); ctx.lineTo(sx, sy + 6); ctx.stroke();
   ctx.fillStyle = 'rgba(0,229,255,0.6)'; ctx.font = '10px "Share Tech Mono", monospace';
   ctx.fillText('0,0', sx + 8, sy + 3);
-  // players
-  players.forEach(p => {
+
+  // players (online = green, offline = gray)
+  pts.forEach(p => {
     const px = toX(p.x), py = toY(p.z);
     ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2);
-    ctx.fillStyle = '#3ecf5b'; ctx.fill();
+    ctx.fillStyle = p.online ? '#3ecf5b' : '#6b7480'; ctx.fill();
     ctx.strokeStyle = '#07090d'; ctx.lineWidth = 2; ctx.stroke();
-    ctx.fillStyle = '#dfe8f0'; ctx.font = '11px "Rajdhani", sans-serif';
-    ctx.fillText(`${p.name} (${p.x}, ${p.z})`, px + 9, py + 4);
+    ctx.fillStyle = p.online ? '#dfe8f0' : '#8a97a8'; ctx.font = '11px "Rajdhani", sans-serif';
+    ctx.fillText(p.online ? `${p.name} (${p.x}, ${p.z})` : `${p.name} · offline`, px + 9, py + 4);
   });
 }
 
@@ -829,12 +889,14 @@ async function selectServer(id) {
       renderSchedules();
       renderBackupCardWithData(s, bundle.backups||[], bundle.backupSettings||{});
       renderNotesFromBundle(bundle);
+      seedMapCache(bundle.mapPositions);
+      updateMapCacheFromPlayers(bundle.players||[]);
       renderPlayerList(bundle.players||[]);
     } else {
-      renderSchedules(); renderBackupCard(); renderNotes(); renderPlayerList([]);
+      renderSchedules(); renderBackupCard(); renderNotes(); seedMapCache({}); renderPlayerList([]);
     }
   } catch(e) {
-    renderSchedules(); renderBackupCard(); renderNotes(); renderPlayerList([]);
+    renderSchedules(); renderBackupCard(); renderNotes(); seedMapCache({}); renderPlayerList([]);
   }
   renderConfigCard(); renderNetworkCard();
   startStatsPolling();
@@ -2576,7 +2638,7 @@ function wireEvents(){
   });
   window.nexus.onInstallError(({serverId,error})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='error';if(serverId===activeId)renderHeader();showToast('❌',error||'Install failed');});
   window.nexus.onConsoleProgress(({serverId,text})=>{if(serverId!==activeId)return;const out=document.getElementById('consoleOutput');if(!out)return;let p=out.querySelector('.progress-line');if(!p){p=document.createElement('div');p.className='log-line progress-line';out.appendChild(p);}p.innerHTML=`<span class="log-ts">${new Date().toLocaleTimeString('en-US',{hour12:false})}</span><span class="log-info">${escapeHtml(text)}</span>`;out.scrollTop=out.scrollHeight;});
-  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';if(currentServerTab==='map')renderMap();}});
+  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){updateMapCacheFromPlayers(players);renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';if(currentServerTab==='map')renderMap();}});
   window.nexus.onSettingsChanged(settings=>{appSettings=settings;applySettingsToUI();if(settings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=settings.consoleFontSize+'px';}});
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
   window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });
