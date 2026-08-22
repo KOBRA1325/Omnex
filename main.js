@@ -4480,7 +4480,11 @@ async function startServerById(id) {
           return;
         }
         if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
-        log(id, 'warn', l);
+        // Minecraft/Java often logs to stderr — parse+hide the health/position
+        // poll replies here too, and classify by content (not force everything warn).
+        if (parseMinecraftEntityData(id, l)) return;
+        if (/^No entity was found$/i.test(l.replace(/^.*?\]:\s*/, '').trim())) return;
+        log(id, classifyLine(l), l);
         parsePlayerEvent(id, l);
       });
     });
