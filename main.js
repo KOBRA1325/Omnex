@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, session } = require('electron');
 let steamAuth;
 try { steamAuth = require('./steam-auth'); } catch(e) { console.warn('Steam auth library not available'); }
 const path   = require('path');
@@ -404,6 +404,19 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 if (gotSingleInstanceLock) app.whenReady().then(async () => {
+  // Let the Map tab embed local map servers (BlueMap/Dynmap) by stripping the
+  // frame-blocking header from their http(s) responses. Only affects remote
+  // http content — Omnex's own file:// UI is untouched.
+  try {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      if (/^https?:\/\//i.test(details.url || '')) {
+        const h = details.responseHeaders || {};
+        Object.keys(h).forEach(k => { if (/^x-frame-options$/i.test(k)) delete h[k]; });
+        return callback({ responseHeaders: h });
+      }
+      callback({});
+    });
+  } catch(e) {}
   // Kill any servers orphaned by a previous session before showing the UI.
   try { await cleanupOrphanedServers(); } catch(e) {}
   createWindow();

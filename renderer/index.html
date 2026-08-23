@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -211,17 +211,26 @@
           </div>
         </div>
 
-        <!-- Map tab (Minecraft): zoomable/pannable player radar -->
+        <!-- Map tab (Minecraft): Radar (built-in) or embedded BlueMap -->
         <div class="tab-view" id="tabMap" style="display:none">
+          <div class="map-modebar">
+            <button class="server-tab active" id="mapModeRadar" onclick="setMapMode('radar')">🛰 Radar</button>
+            <button class="server-tab" id="mapModeBlue" onclick="setMapMode('bluemap')">🗺 BlueMap</button>
+            <input class="map-url-input" id="bluemapUrlInput" placeholder="http://localhost:8100"
+              onkeydown="if(event.key==='Enter')applyBluemapUrl()" style="pointer-events:all">
+            <button class="server-tab" onclick="applyBluemapUrl()">Load</button>
+            <button class="server-tab" onclick="openBluemapExternal()" title="Open in browser">↗</button>
+          </div>
           <div id="mapCanvasWrap">
             <canvas id="mapCanvas"></canvas>
-            <div class="map-controls">
+            <iframe id="bluemapFrame" title="BlueMap" style="display:none"></iframe>
+            <div class="map-controls" id="mapRadarControls">
               <button class="map-btn" onclick="mapZoomBy(1.2)" title="Zoom in">＋</button>
               <button class="map-btn" onclick="mapZoomBy(0.8333)" title="Zoom out">－</button>
               <button class="map-btn" onclick="recenterMap()" title="Recenter / fit">⌖</button>
             </div>
             <div class="map-empty" id="mapEmpty">No player positions recorded yet…</div>
-            <div class="map-hint">scroll to zoom · drag to pan</div>
+            <div class="map-hint" id="mapHint">scroll to zoom · drag to pan</div>
           </div>
         </div>
       </div>

@@ -239,7 +239,7 @@ function switchServerTab(tab) {
     if (view) view.style.display = (t === tab) ? 'flex' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   }
-  if (tab === 'map') { initMapInteractions(); renderMap(); }
+  if (tab === 'map') { initMapInteractions(); updateMapView(); }
   if (tab === 'chat') { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
 }
 
@@ -375,6 +375,58 @@ function renderMap() {
     ctx.fillStyle = p.online ? '#dfe8f0' : '#8a97a8'; ctx.font = '11px "Rajdhani", sans-serif';
     ctx.fillText(p.online ? `${p.name} (${p.x}, ${p.z})` : `${p.name} · offline`, px + 9, py + 4);
   });
+}
+
+// ── Map mode: Radar (built-in) vs embedded BlueMap ────────────────────────────
+function currentMapMode() { const s = getActive(); return (s && s.mapMode) || 'radar'; }
+function updateMapView() {
+  const s = getActive(); if (!s) return;
+  const mode = s.mapMode || 'radar';
+  const canvas   = document.getElementById('mapCanvas');
+  const frame    = document.getElementById('bluemapFrame');
+  const controls = document.getElementById('mapRadarControls');
+  const empty    = document.getElementById('mapEmpty');
+  const hint     = document.getElementById('mapHint');
+  const urlInput = document.getElementById('bluemapUrlInput');
+  document.getElementById('mapModeRadar')?.classList.toggle('active', mode === 'radar');
+  document.getElementById('mapModeBlue')?.classList.toggle('active', mode === 'bluemap');
+  if (urlInput && document.activeElement !== urlInput) urlInput.value = s.bluemapUrl || '';
+  if (mode === 'bluemap') {
+    const url = s.bluemapUrl || 'http://localhost:8100';
+    if (canvas)   canvas.style.display = 'none';
+    if (controls) controls.style.display = 'none';
+    if (empty)    empty.style.display = 'none';
+    if (hint)     hint.style.display = 'none';
+    if (frame)  { frame.style.display = 'block'; if (frame.getAttribute('src') !== url) frame.setAttribute('src', url); }
+  } else {
+    if (frame)    frame.style.display = 'none';
+    if (canvas)   canvas.style.display = 'block';
+    if (controls) controls.style.display = 'flex';
+    if (hint)     hint.style.display = 'block';
+    renderMap();
+  }
+}
+function setMapMode(mode) {
+  const s = getActive(); if (!s) return;
+  s.mapMode = mode;
+  try { window.nexus.setServerField(s.id, 'mapMode', mode); } catch(e) {}
+  updateMapView();
+}
+function applyBluemapUrl() {
+  const s = getActive(); if (!s) return;
+  const input = document.getElementById('bluemapUrlInput');
+  let url = ((input && input.value) || '').trim() || 'http://localhost:8100';
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  s.bluemapUrl = url; s.mapMode = 'bluemap';
+  try { window.nexus.setServerField(s.id, 'bluemapUrl', url); window.nexus.setServerField(s.id, 'mapMode', 'bluemap'); } catch(e) {}
+  const frame = document.getElementById('bluemapFrame'); if (frame) frame.setAttribute('src', url); // force (re)load
+  updateMapView();
+}
+function openBluemapExternal() {
+  const s = getActive();
+  const input = document.getElementById('bluemapUrlInput');
+  const url = (s && s.bluemapUrl) || ((input && input.value) || '').trim() || 'http://localhost:8100';
+  try { window.nexus.openExternal(url); } catch(e) {}
 }
 
 // ── Console search ────────────────────────────────────────────────────────────
@@ -2638,7 +2690,7 @@ function wireEvents(){
   });
   window.nexus.onInstallError(({serverId,error})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='error';if(serverId===activeId)renderHeader();showToast('❌',error||'Install failed');});
   window.nexus.onConsoleProgress(({serverId,text})=>{if(serverId!==activeId)return;const out=document.getElementById('consoleOutput');if(!out)return;let p=out.querySelector('.progress-line');if(!p){p=document.createElement('div');p.className='log-line progress-line';out.appendChild(p);}p.innerHTML=`<span class="log-ts">${new Date().toLocaleTimeString('en-US',{hour12:false})}</span><span class="log-info">${escapeHtml(text)}</span>`;out.scrollTop=out.scrollHeight;});
-  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){updateMapCacheFromPlayers(players);renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';if(currentServerTab==='map')renderMap();}});
+  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){updateMapCacheFromPlayers(players);renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';if(currentServerTab==='map'&&currentMapMode()==='radar')renderMap();}});
   window.nexus.onSettingsChanged(settings=>{appSettings=settings;applySettingsToUI();if(settings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=settings.consoleFontSize+'px';}});
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
   window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });
