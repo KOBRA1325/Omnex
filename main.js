@@ -5049,7 +5049,9 @@ function parseMinecraftEntityData(serverId, line) {
   return true;
 }
 
-// Poll online Minecraft players' health + position every 15s (Minecraft-only).
+// Poll online Minecraft players' health every 15s for the player-list HP bar
+// (Minecraft-only). Position polling was removed with the built-in radar — the
+// map is now BlueMap/Dynmap, which track players themselves.
 setInterval(() => {
   for (const s of appData.servers) {
     if (GAME_DEFS[s.game]?.type !== 'minecraft') continue;
@@ -5057,10 +5059,7 @@ setInterval(() => {
     if (!proc || !Array.isArray(s.players) || !s.players.length) continue;
     for (const p of s.players) {
       const name = p && p.name; if (!name) continue;
-      try {
-        proc.stdin.write(`data get entity ${name} Health\n`);
-        proc.stdin.write(`data get entity ${name} Pos\n`);
-      } catch(e) {}
+      try { proc.stdin.write(`data get entity ${name} Health\n`); } catch(e) {}
     }
   }
 }, 15000);

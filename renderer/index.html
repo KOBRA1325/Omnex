@@ -211,26 +211,19 @@
           </div>
         </div>
 
-        <!-- Map tab (Minecraft): Radar (built-in) or embedded BlueMap -->
+        <!-- Map tab (Minecraft): embed a server map plugin — BlueMap or Dynmap -->
         <div class="tab-view" id="tabMap" style="display:none">
           <div class="map-modebar">
-            <button class="server-tab active" id="mapModeRadar" onclick="setMapMode('radar')">🛰 Radar</button>
-            <button class="server-tab" id="mapModeBlue" onclick="setMapMode('bluemap')">🗺 BlueMap</button>
-            <input class="map-url-input" id="bluemapUrlInput" placeholder="http://localhost:8100"
-              onkeydown="if(event.key==='Enter')applyBluemapUrl()" style="pointer-events:all">
-            <button class="server-tab" onclick="applyBluemapUrl()">Load</button>
-            <button class="server-tab" onclick="openBluemapExternal()" title="Open in browser">↗</button>
+            <button class="server-tab active" id="mapModeBlue" onclick="setMapMode('bluemap')">🗺 BlueMap</button>
+            <button class="server-tab" id="mapModeDyn" onclick="setMapMode('dynmap')">🗺 Dynmap</button>
+            <input class="map-url-input" id="mapUrlInput" placeholder="http://localhost:8100"
+              onkeydown="if(event.key==='Enter')applyMapUrl()" style="pointer-events:all">
+            <button class="server-tab" onclick="applyMapUrl()">Load</button>
+            <button class="server-tab" onclick="openMapExternal()" title="Open in browser">↗</button>
           </div>
           <div id="mapCanvasWrap">
-            <canvas id="mapCanvas"></canvas>
-            <iframe id="bluemapFrame" title="BlueMap" style="display:none"></iframe>
-            <div class="map-controls" id="mapRadarControls">
-              <button class="map-btn" onclick="mapZoomBy(1.2)" title="Zoom in">＋</button>
-              <button class="map-btn" onclick="mapZoomBy(0.8333)" title="Zoom out">－</button>
-              <button class="map-btn" onclick="recenterMap()" title="Recenter / fit">⌖</button>
-            </div>
-            <div class="map-empty" id="mapEmpty">No player positions recorded yet…</div>
-            <div class="map-hint" id="mapHint">scroll to zoom · drag to pan</div>
+            <iframe id="mapFrame" title="Server Map"></iframe>
+            <div class="map-empty" id="mapEmpty">Pick BlueMap or Dynmap, set the URL, and click Load.</div>
           </div>
         </div>
       </div>
