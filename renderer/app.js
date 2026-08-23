@@ -201,6 +201,11 @@ function appendLog(type, text, ts) {
   const time = ts || new Date().toLocaleTimeString('en-US', { hour12: false });
   const mc = getActive()?.game === 'Minecraft'; // chat tab only routes for Minecraft
   text.split('\n').filter(l => l.trim()).forEach(l => {
+    // Display-side backstop: never show the Minecraft health/position poll replies,
+    // regardless of what the engine sends (keeps the console clean even if an older
+    // main process is still running the server).
+    if (/has the following entity data:/.test(l)) return;
+    if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
     _consoleBuf.push({ type, text: l, time });
     if (mc) { const c = parseChatLine(l); if (c) appendChat(c.name, c.msg, time); }
   });
