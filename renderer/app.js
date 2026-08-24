@@ -1110,11 +1110,14 @@ function updateInstallBtn() {
 }
 function updateMcVisibility() {
   const mc = document.getElementById('mcOptions'); if(!mc) return;
-  mc.style.display = selectedGame.name === 'Minecraft' ? '' : 'none';
+  const isMc = selectedGame.name === 'Minecraft';
+  mc.style.display = isMc ? '' : 'none';
+  if (isMc) loadMcVersions(); // populate the version dropdown when Minecraft is selected
 }
 function pickMcType(type) {
   selectedMcType = type;
   document.querySelectorAll('.mc-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type===type));
+  loadMcVersions(); // version list differs per type (vanilla/paper/fabric)
   updateInstallInfo();
 }
 function updateInstallInfo() {
@@ -1925,14 +1928,18 @@ async function checkJavaStatus(id) {
 // ── Minecraft version picker ──────────────────────────────────────────────────
 async function loadMcVersions() {
   const sel = document.getElementById('mcVersionSelect'); if(!sel) return;
-  sel.innerHTML='<option value="latest">Loading...</option>';
+  sel.innerHTML='<option value="latest">Loading versions…</option>';
+  // Handlers return { ok, versions } — unwrap to the array (tolerate a bare array too).
+  const unwrap = r => Array.isArray(r) ? r : ((r && r.versions) || []);
   try {
     let versions = [];
-    if (selectedMcType==='vanilla') versions = await window.nexus.getMinecraftVersions();
-    else if (selectedMcType==='paper') versions = await window.nexus.getPaperVersions();
-    else if (selectedMcType==='fabric') versions = await window.nexus.getFabricVersions();
+    if (selectedMcType==='vanilla')      versions = unwrap(await window.nexus.getMinecraftVersions());
+    else if (selectedMcType==='paper')   versions = unwrap(await window.nexus.getPaperVersions());
+    else if (selectedMcType==='fabric')  versions = unwrap(await window.nexus.getFabricVersions());
     else { sel.innerHTML='<option value="latest">Latest</option>'; return; }
-    sel.innerHTML = versions.slice(0,20).map(v=>`<option value="${v}">${v}</option>`).join('');
+    const opts = ['<option value="latest">Latest</option>']
+      .concat(versions.slice(0,30).map(v=>`<option value="${v}">${v}</option>`));
+    sel.innerHTML = opts.join('');
   } catch(e) { sel.innerHTML='<option value="latest">Latest</option>'; }
 }
 

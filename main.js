@@ -5109,12 +5109,15 @@ function fetchJSON(url) {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     const opts  = { headers:{ 'User-Agent':'Omnex/1.0' } };
-    proto.get(url, opts, res => {
+    const req = proto.get(url, opts, res => {
       if ([301,302].includes(res.statusCode)) return fetchJSON(res.headers.location).then(resolve).catch(reject);
       let data='';
       res.on('data',d=>data+=d);
       res.on('end',()=>{ try{resolve(JSON.parse(data));}catch(e){reject(e);} });
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    // Don't hang forever if the endpoint is unreachable — reject so callers fall back.
+    req.setTimeout(12000, () => req.destroy(new Error('Request timed out')));
   });
 }
 
