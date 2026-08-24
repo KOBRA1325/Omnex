@@ -1524,6 +1524,52 @@ async function installMinecraft(serverId, installDir, config) {
   if (!fs.existsSync(eulaPath)) fs.writeFileSync(eulaPath,'eula=true\n');
   const propsPath = path.join(installDir,'server.properties');
   if (!fs.existsSync(propsPath)) fs.writeFileSync(propsPath, [`server-port=${config.port||25565}`,'gamemode=survival','difficulty=normal','max-players=20','online-mode=true',`motd=${config.name||'My Minecraft Server'}`].join('\n')+'\n');
+
+  // Auto-install BlueMap (+ Fabric API on Fabric) so the Map tab works out of the
+  // box on moddable servers. Best-effort — never blocks/fails the install.
+  await installBlueMapForServer(serverId, installDir, type, resolvedVersion);
+}
+
+// Download BlueMap (and, on Fabric, the required Fabric API) into mods/ (Fabric,
+// Forge) or plugins/ (Paper) via Modrinth, version-matched to this server. Also
+// pre-accepts BlueMap's texture download so it renders on first start. Best-effort.
+async function installBlueMapForServer(serverId, installDir, type, mcVersion) {
+  const loader = { fabric: 'fabric', forge: 'forge', paper: 'paper' }[type];
+  if (!loader || !mcVersion || mcVersion === 'latest') return; // vanilla / unresolved → no BlueMap
+  const targetDir = loader === 'paper' ? 'plugins' : 'mods';
+  const destDir   = path.join(installDir, targetDir);
+  const projects  = loader === 'fabric' ? ['fabric-api', 'bluemap'] : ['bluemap'];
+  for (const project of projects) {
+    try {
+      const params = new URLSearchParams();
+      params.set('game_versions', JSON.stringify([mcVersion]));
+      params.set('loaders',       JSON.stringify([loader]));
+      const versions = await fetchJSON(`https://api.modrinth.com/v2/project/${project}/version?${params}`);
+      const v    = Array.isArray(versions) ? versions[0] : null;
+      const file = v && (v.files.find(f => f.primary) || v.files[0]);
+      if (!file) { log(serverId, 'warn', `No ${project} build for Minecraft ${mcVersion} (${loader}) — skipping.`); continue; }
+      fs.mkdirSync(destDir, { recursive: true });
+      log(serverId, 'info', `Installing ${project} → ${targetDir}/ (for the live map)...`);
+      await downloadFile(file.url, path.join(destDir, file.filename), pct => {
+        emit('console-progress', { serverId, text: `⬇  ${project}  ${pct}%` });
+      });
+      log(serverId, 'success', `✔ ${file.filename} installed.`);
+    } catch (err) {
+      log(serverId, 'warn', `Could not auto-install ${project}: ${err.message} (map may need manual setup).`);
+    }
+  }
+  // Pre-accept BlueMap's Minecraft-texture download so it renders on first start
+  // (otherwise it refuses until accept-download is set). Config path differs by platform.
+  try {
+    const cfgDir = loader === 'paper'
+      ? path.join(installDir, 'plugins', 'BlueMap')
+      : path.join(installDir, 'config', 'bluemap');
+    const corePath = path.join(cfgDir, 'core.conf');
+    if (!fs.existsSync(corePath)) {
+      fs.mkdirSync(cfgDir, { recursive: true });
+      fs.writeFileSync(corePath, 'accept-download: true\n');
+    }
+  } catch (e) {}
 }
 
 // Find a runnable Minecraft server jar in a folder — handles vanilla (server.jar),
@@ -1629,6 +1675,7 @@ async function installFabric(serverId, installDir, version) {
     emit('console-progress', { serverId, text: `⬇  Fabric ${ver}  [${bar}] ${pct}%` });
   });
   log(serverId,'success',`✔ Fabric ${ver} downloaded.`);
+  return ver;
 }
 
 async function installForge(serverId, installDir, version) {
@@ -1663,6 +1710,7 @@ async function installForge(serverId, installDir, version) {
     if (srv) { srv.execPath=runBat; srv.useShell=true; }
   }
   log(serverId,'success',`✔ Forge ${fullVer} installed.`);
+  return mcVer;
 }
 
 
