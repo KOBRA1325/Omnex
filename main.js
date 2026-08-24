@@ -262,7 +262,7 @@ function buildTrayMenu() {
   }
 
   items.push({ label: 'Open Omnex', click: () => { mainWindow?.show(); mainWindow?.focus(); } });
-  items.push({ label: 'Quit',       click: () => { Object.keys(serverProcesses).forEach(killServer); app.quit(); } });
+  items.push({ label: 'Quit',       click: () => { isQuitting = true; Object.keys(serverProcesses).forEach(killServer); app.quit(); } });
 
   return Menu.buildFromTemplate(items);
 }
@@ -333,6 +333,7 @@ const serverProcesses = {};
 
 // ── Window ────────────────────────────────────────────────────────────────────
 let mainWindow;
+let isQuitting = false; // true once a real quit is underway, so the close handler stops hiding to tray
 
 // Enforce a single running instance. A second launch focuses the existing
 // window and quits — two Omnex instances can never run at once and fight over
@@ -393,7 +394,9 @@ function createWindow() {
     });
   }
   mainWindow.on('close', e => {
-    if (tray && appSettings.minimizeToTray) {
+    // Hide to tray on a normal window close — but NOT when a real quit is in
+    // progress (tray "Quit", app.quit, etc.), otherwise the app never exits.
+    if (!isQuitting && tray && appSettings.minimizeToTray) {
       e.preventDefault();
       mainWindow.hide();
       tray.setContextMenu(buildTrayMenu());
@@ -427,6 +430,7 @@ if (gotSingleInstanceLock) app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true; // let the window close handler actually close instead of hiding
   // Stop stats refresh and force-kill running servers so we don't leave orphans.
   statsCacheTime = 0;
   Object.keys(serverProcesses).forEach(id => {
