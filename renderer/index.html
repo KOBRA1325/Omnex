@@ -168,11 +168,12 @@
         <div class="console-topbar">
           <div class="console-title">Live Console</div>
           <div class="console-live-badge" id="liveBadge"><div class="live-dot"></div> LIVE</div>
-          <!-- Minecraft-only tab switcher (Console / Chat / Map) -->
+          <!-- Per-game tab switcher (Minecraft: Console/Chat/Map · FS25: Console/Web Admin) -->
           <div class="server-tabs" id="serverTabs" style="display:none">
             <button class="server-tab active" id="tabBtnConsole" onclick="switchServerTab('console')">Console</button>
             <button class="server-tab" id="tabBtnChat" onclick="switchServerTab('chat')">Chat</button>
             <button class="server-tab" id="tabBtnMap" onclick="switchServerTab('map')">Map</button>
+            <button class="server-tab" id="tabBtnPanel" onclick="switchServerTab('panel')" style="display:none">🖥 Web Admin</button>
           </div>
           <div class="console-search-wrap" id="consoleSearchWrap" style="display:none">
             <input class="console-search-input" id="consoleSearchInput"
@@ -224,6 +225,20 @@
           <div id="mapCanvasWrap">
             <iframe id="mapFrame" title="Server Map"></iframe>
             <div class="map-empty" id="mapEmpty">Pick BlueMap or Dynmap, set the URL, and click Load.</div>
+          </div>
+        </div>
+
+        <!-- Web Admin tab (Farming Simulator 25): embed the dedicated-server panel -->
+        <div class="tab-view" id="tabPanel" style="display:none">
+          <div class="map-modebar">
+            <input class="map-url-input" id="panelUrlInput" placeholder="http://localhost:8080"
+              onkeydown="if(event.key==='Enter')applyPanelUrl()" style="pointer-events:all">
+            <button class="server-tab" onclick="applyPanelUrl()">Load</button>
+            <button class="server-tab" onclick="openPanelExternal()" title="Open in browser">↗</button>
+          </div>
+          <div id="panelWrap">
+            <iframe id="panelFrame" title="Web Admin"></iframe>
+            <div class="map-empty" id="panelEmpty">Enter the Farming Simulator web admin URL (default http://localhost:8080) and click Load.</div>
           </div>
         </div>
       </div>

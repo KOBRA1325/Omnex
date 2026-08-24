@@ -299,6 +299,9 @@ const GAME_DEFS = {
     return args;
   } },
   'Enshrouded':      { type:'steam', serverAppId:'2278520',startExe:'enshrouded_server.exe',    startArgs:(d,s)=>[] },
+  // Farming Simulator 25 — import-only (Giants gates the download behind a separate
+  // license; can't be fetched by SteamCMD). Managed via its web admin panel (:8080).
+  'Farming Simulator 25': { type:'import', startExe:'dedicatedServer.exe', startArgs:(d,s)=>[], webAdminPort:8080 },
 };
 
 // Games where the real server can detach from the process we spawned, so on Stop
@@ -3498,7 +3501,7 @@ ipcMain.handle('browse-folder', async () => {
 const GAME_DEFAULT_PORTS = {
   'Minecraft':'25565', 'CS2':'27015', 'Valheim':'2456', 'Rust':'28015', 'Satisfactory':'15777',
   'Project Zomboid':'16261', 'Ark: Survival':'7777', 'V Rising':'9876', 'Terraria':'7777',
-  '7 Days to Die':'26900', 'Palworld':'8211', 'Enshrouded':'15636',
+  '7 Days to Die':'26900', 'Palworld':'8211', 'Enshrouded':'15636', 'Farming Simulator 25':'10823',
 };
 
 // Best-effort: read the actual configured port out of a known server config file.

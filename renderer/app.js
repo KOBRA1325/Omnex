@@ -164,6 +164,7 @@ const GAMES = [
   { name:'7 Days to Die',   port:'26900', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/251570/capsule_sm_120.jpg',  fallback:'💀' },
   { name:'Palworld',        port:'8211',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1623730/capsule_sm_120.jpg', fallback:'🐾' },
   { name:'Enshrouded',      port:'15636', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1203620/capsule_sm_120.jpg', fallback:'🌫️' },
+  { name:'Farming Simulator 25', port:'10823', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/2300320/capsule_sm_120.jpg', fallback:'🚜', importOnly:true },
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -237,15 +238,44 @@ function clearConsole() {
 let currentServerTab = 'console';
 function switchServerTab(tab) {
   currentServerTab = tab;
-  for (const t of ['console', 'chat', 'map']) {
+  for (const t of ['console', 'chat', 'map', 'panel']) {
     const cap  = t.charAt(0).toUpperCase() + t.slice(1);
     const view = document.getElementById('tab' + cap);
     const btn  = document.getElementById('tabBtn' + cap);
     if (view) view.style.display = (t === tab) ? 'flex' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   }
-  if (tab === 'map') { updateMapView(); }
-  if (tab === 'chat') { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
+  if (tab === 'map')   { updateMapView(); }
+  if (tab === 'panel') { updatePanelView(); }
+  if (tab === 'chat')  { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
+}
+
+// Web Admin panel embed (Farming Simulator 25 — the dedicated-server web UI).
+function updatePanelView() {
+  const s = getActive(); if (!s) return;
+  const frame = document.getElementById('panelFrame');
+  const empty = document.getElementById('panelEmpty');
+  const urlInput = document.getElementById('panelUrlInput');
+  const url = s.panelUrl || 'http://localhost:8080';
+  if (urlInput && document.activeElement !== urlInput) urlInput.value = url;
+  if (empty) empty.style.display = 'none';
+  if (frame && frame.getAttribute('src') !== url) frame.setAttribute('src', url);
+}
+function applyPanelUrl() {
+  const s = getActive(); if (!s) return;
+  const input = document.getElementById('panelUrlInput');
+  let url = ((input && input.value) || '').trim() || 'http://localhost:8080';
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  s.panelUrl = url;
+  try { window.nexus.setServerField(s.id, 'panelUrl', url); } catch(e) {}
+  const frame = document.getElementById('panelFrame'); if (frame) frame.setAttribute('src', url); // force (re)load
+  updatePanelView();
+}
+function openPanelExternal() {
+  const s = getActive(); if (!s) return;
+  const input = document.getElementById('panelUrlInput');
+  const url = (s && s.panelUrl) || ((input && input.value) || '').trim() || 'http://localhost:8080';
+  try { window.nexus.openExternal(url); } catch(e) {}
 }
 
 // Chat: detect "<Name> message" lines and mirror them into the Chat tab.
@@ -807,9 +837,14 @@ async function selectServer(id) {
   const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
   _consoleBuf = []; // drop any pending lines queued from the previous server
   const s = servers.find(sv => sv.id === id);
-  // Tabs: only Minecraft servers get Chat + Map. Reset to Console and clear chat.
+  // Tabs are per-game: Minecraft gets Chat + Map; Farming Simulator 25 gets Web Admin.
+  const isMc = !!(s && s.game === 'Minecraft');
+  const isFs = !!(s && s.game === 'Farming Simulator 25');
   const tabs = document.getElementById('serverTabs');
-  if (tabs) tabs.style.display = (s && s.game === 'Minecraft') ? 'flex' : 'none';
+  if (tabs) tabs.style.display = (isMc || isFs) ? 'flex' : 'none';
+  const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = isMc ? '' : 'none';
+  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = isMc ? '' : 'none';
+  const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
   const chatOut = document.getElementById('chatOutput');
   if (chatOut) chatOut.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No chat yet.</div>';
@@ -1126,7 +1161,9 @@ function updateInstallInfo() {
   const isSteam = steamGames.includes(g.name);
   const existing = servers.filter(s => s.game === g.name);
   const countNote = existing.length > 0 ? ` You already have ${existing.length} ${g.name} server${existing.length>1?'s':''} — this will create a new one.` : '';  const el = document.getElementById('installInfoText'); if(!el) return;
-  const info = g.name === 'Terraria'
+  const info = g.importOnly
+    ? `${g.name} is import-only — install its dedicated server from your own account, then use the Import tab to add it. Omnex can't download it automatically.`
+    : g.name === 'Terraria'
     ? `Omnex will download the official Terraria Dedicated Server from terraria.org and configure it automatically. No Steam account required.`
     : (isSteam
       ? `Omnex will download SteamCMD and install the ${g.name} dedicated server. No Steam account required.`
@@ -1137,6 +1174,11 @@ function updateInstallInfo() {
 }
 function addModalAction() { addModalMode === 'install' ? installServer() : doImportServer(); }
 async function installServer() {
+  if (selectedGame.importOnly) {
+    showToast('📂', `${selectedGame.name} is import-only — switch to the Import tab after installing it from your account.`);
+    switchAddTab('import');
+    return;
+  }
   const nameInput = document.getElementById('newSrvName');
   const portInput = document.getElementById('newSrvPort');
   if (!nameInput || !portInput) return;
