@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('nexus', {
   getMinecraftVersions: () => ipcRenderer.invoke('get-minecraft-versions'),
   getPaperVersions:     () => ipcRenderer.invoke('get-paper-versions'),
   getFabricVersions:    () => ipcRenderer.invoke('get-fabric-versions'),
+  getForgeVersions:     () => ipcRenderer.invoke('get-forge-versions'),
   checkJava:            (opts) => ipcRenderer.invoke('check-java', opts),
   readServerConfig:    (id)                   => ipcRenderer.invoke('read-server-config', id),
   writeServerConfig:   (id, props)               => ipcRenderer.invoke('write-server-config', { id, props }),

@@ -1936,6 +1936,7 @@ async function loadMcVersions() {
     if (selectedMcType==='vanilla')      versions = unwrap(await window.nexus.getMinecraftVersions());
     else if (selectedMcType==='paper')   versions = unwrap(await window.nexus.getPaperVersions());
     else if (selectedMcType==='fabric')  versions = unwrap(await window.nexus.getFabricVersions());
+    else if (selectedMcType==='forge')   versions = unwrap(await window.nexus.getForgeVersions());
     else { sel.innerHTML='<option value="latest">Latest</option>'; return; }
     const opts = ['<option value="latest">Latest</option>']
       .concat(versions.slice(0,30).map(v=>`<option value="${v}">${v}</option>`));

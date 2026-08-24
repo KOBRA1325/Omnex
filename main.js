@@ -724,6 +724,13 @@ ipcMain.handle('toggle-schedule', (e,id) => { const s=appData.schedules.find(s=>
 ipcMain.handle('delete-schedule', (e,id) => { appData.schedules=appData.schedules.filter(s=>s.id!==id); saveData(); return appData.schedules; });
 
 // ── Minecraft version/type fetching ──────────────────────────────────────────
+// Compare two "1.x.y" version strings, newest first.
+function cmpMcVersionDesc(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { const d = (pb[i] || 0) - (pa[i] || 0); if (d) return d; }
+  return 0;
+}
 ipcMain.handle('get-minecraft-versions', async () => {
   try {
     const manifest = await fetchJSON('https://launchermeta.mojang.com/mc/game/version_manifest.json');
@@ -737,8 +744,24 @@ ipcMain.handle('get-minecraft-versions', async () => {
 
 ipcMain.handle('get-paper-versions', async () => {
   try {
-    const data = await fetchJSON('https://api.papermc.io/v2/projects/paper');
-    return { ok:true, versions: [...data.versions].reverse() };
+    // PaperMC v2 API is retired (410 Gone) — use the v3 "fill" API.
+    const data = await fetchJSON('https://fill.papermc.io/v3/projects/paper');
+    const all = [];
+    for (const arr of Object.values(data.versions || {})) {
+      for (const v of (arr || [])) if (String(v).startsWith('1.') && !/-(rc|pre|snapshot)/i.test(v)) all.push(v);
+    }
+    all.sort(cmpMcVersionDesc);
+    return { ok:true, versions: all };
+  } catch(e) { return { ok:false, versions:[] }; }
+});
+
+ipcMain.handle('get-forge-versions', async () => {
+  try {
+    const data = await fetchJSON('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json');
+    const versions = [...new Set(Object.keys(data.promos || {}).map(k => k.replace(/-(latest|recommended)$/i, '')))]
+      .filter(v => v.startsWith('1.'));
+    versions.sort(cmpMcVersionDesc);
+    return { ok:true, versions };
   } catch(e) { return { ok:false, versions:[] }; }
 });
 
@@ -1565,14 +1588,23 @@ async function installVanilla(serverId, installDir, version) {
 }
 
 async function installPaper(serverId, installDir, version) {
-  const data = await fetchJSON('https://api.papermc.io/v2/projects/paper');
-  const ver  = version==='latest' ? data.versions[data.versions.length-1] : version;
-  const builds = await fetchJSON(`https://api.papermc.io/v2/projects/paper/versions/${ver}/builds`);
-  const latest = builds.builds[builds.builds.length-1];
-  const fileName = latest.downloads.application.name;
-  const url = `https://api.papermc.io/v2/projects/paper/versions/${ver}/builds/${latest.build}/downloads/${fileName}`;
-  log(serverId,'info',`Downloading PaperMC ${ver} build ${latest.build}...`);
-  await downloadFile(url, path.join(installDir,'server.jar'), pct => {
+  // PaperMC v3 "fill" API (v2 was retired / 410 Gone).
+  let ver = version;
+  if (!ver || ver === 'latest') {
+    const data = await fetchJSON('https://fill.papermc.io/v3/projects/paper');
+    const all = [];
+    for (const arr of Object.values(data.versions || {})) {
+      for (const v of (arr || [])) if (String(v).startsWith('1.') && !/-(rc|pre|snapshot)/i.test(v)) all.push(v);
+    }
+    all.sort(cmpMcVersionDesc);
+    ver = all[0];
+    if (!ver) throw new Error('Could not resolve latest Paper version');
+  }
+  const build = await fetchJSON(`https://fill.papermc.io/v3/projects/paper/versions/${ver}/builds/latest`);
+  const dl = build && build.downloads && build.downloads['server:default'];
+  if (!dl || !dl.url) throw new Error(`No Paper build found for Minecraft ${ver}`);
+  log(serverId,'info',`Downloading PaperMC ${ver} build ${build.id}...`);
+  await downloadFile(dl.url, path.join(installDir,'server.jar'), pct => {
     const filled = Math.floor(pct / 5);
     const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
     emit('console-progress', { serverId, text: `⬇  Paper ${ver}  [${bar}] ${pct}%` });
