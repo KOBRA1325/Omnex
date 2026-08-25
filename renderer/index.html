@@ -170,6 +170,7 @@
           <div class="console-live-badge" id="liveBadge"><div class="live-dot"></div> LIVE</div>
           <!-- Per-game tab switcher (Minecraft: Console/Chat/Map · FS25: Console/Web Admin) -->
           <div class="server-tabs" id="serverTabs" style="display:none">
+            <button class="server-tab" id="tabBtnOverview" onclick="switchServerTab('overview')" style="display:none">📊 Overview</button>
             <button class="server-tab active" id="tabBtnConsole" onclick="switchServerTab('console')">Console</button>
             <button class="server-tab" id="tabBtnActivity" onclick="switchServerTab('activity')" style="display:none">✨ Activity</button>
             <button class="server-tab" id="tabBtnChat" onclick="switchServerTab('chat')">Chat</button>
@@ -187,6 +188,30 @@
           <button class="console-clear" onclick="toggleConsoleSearch()" title="Search (Ctrl+F)">🔍</button>
           <button class="console-clear" onclick="openEventLogModal()" title="Event log: crashes, mass disconnects, CPU spikes">⚠ Events</button>
           <button class="console-clear" onclick="clearConsole()">Clear</button>
+        </div>
+
+        <!-- Overview tab (Minecraft): the "cockpit" — crew, live stats, recent activity -->
+        <div class="tab-view cockpit" id="tabOverview" style="display:none">
+          <div class="cockpit-scroll">
+            <div class="cockpit-tiles">
+              <div class="ctile"><div class="ctile-val" id="ckPlayers">0</div><div class="ctile-lbl">Players</div></div>
+              <div class="ctile"><div class="ctile-val" id="ckUptime">—</div><div class="ctile-lbl">Uptime</div></div>
+              <div class="ctile"><div class="ctile-val" id="ckCpu">—</div><div class="ctile-lbl">CPU</div></div>
+              <div class="ctile"><div class="ctile-val" id="ckRam">—</div><div class="ctile-lbl">RAM</div></div>
+            </div>
+            <div class="cockpit-section">
+              <div class="cockpit-h">👥 Crew <span class="cockpit-h-sub" id="ckCrewCount"></span></div>
+              <div class="crew-grid" id="cockpitPlayers">
+                <div class="empty-msg-sm" style="padding:16px">No one's on right now. When players join, they'll show up here.</div>
+              </div>
+            </div>
+            <div class="cockpit-section">
+              <div class="cockpit-h">✨ Recent activity</div>
+              <div class="cockpit-recent" id="cockpitActivity">
+                <div class="empty-msg-sm" style="padding:12px">Nothing yet.</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Console tab -->
