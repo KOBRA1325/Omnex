@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com data:; frame-src 'self' http: https:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -171,6 +171,7 @@
           <!-- Per-game tab switcher (Minecraft: Console/Chat/Map · FS25: Console/Web Admin) -->
           <div class="server-tabs" id="serverTabs" style="display:none">
             <button class="server-tab active" id="tabBtnConsole" onclick="switchServerTab('console')">Console</button>
+            <button class="server-tab" id="tabBtnActivity" onclick="switchServerTab('activity')" style="display:none">✨ Activity</button>
             <button class="server-tab" id="tabBtnChat" onclick="switchServerTab('chat')">Chat</button>
             <button class="server-tab" id="tabBtnMap" onclick="switchServerTab('map')">Map</button>
             <button class="server-tab" id="tabBtnPanel" onclick="switchServerTab('panel')" style="display:none">🖥 Web Admin</button>
@@ -197,6 +198,13 @@
             <div class="console-prompt">&gt;_</div>
             <input class="console-input" id="consoleInput" placeholder="Send command to server..." onkeydown="handleCmd(event)" style="pointer-events:all;">
             <button class="console-send" onclick="sendCommand()">Send</button>
+          </div>
+        </div>
+
+        <!-- Activity tab (Minecraft): live feed of joins/leaves/deaths/advancements/chat -->
+        <div class="tab-view" id="tabActivity" style="display:none">
+          <div class="activity-feed" id="activityFeed">
+            <div class="empty-msg-sm" style="padding:12px">No activity yet — it'll fill up as players join, die, earn advancements, and chat.</div>
           </div>
         </div>
 

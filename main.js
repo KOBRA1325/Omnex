@@ -682,6 +682,8 @@ ipcMain.handle('get-servers',   () => appData.servers.map(s => {
 }));
 // Replay a server's buffered console output (used when switching servers).
 ipcMain.handle('get-console', (e, id) => consoleHistory[id] || []);
+// Replay a server's activity feed (joins/leaves/deaths/advancements/chat).
+ipcMain.handle('get-activity', (e, id) => activityHistory[id] || []);
 // Clear a server's buffered console so "Clear console" stays cleared on switch-back.
 ipcMain.handle('clear-console', (e, id) => { if (id != null) consoleHistory[id] = []; return true; });
 // Event log: read (last 500 lines), open the file, or clear it.
@@ -718,6 +720,7 @@ ipcMain.handle('remove-server', async (e, id) => {
   }
   appData.servers = appData.servers.filter(s=>s.id!==id);
   delete consoleHistory[id];
+  delete activityHistory[id]; delete _lastActivity[id];
   try { fs.rmSync(eventLogPath(id), { force: true }); } catch(e) {}
   saveData(); return true;
 });
@@ -5056,6 +5059,38 @@ function classifyLine(t) {
 // Minecraft players are stored as objects { name, joinedAt, health } so the UI
 // can show session time + live health. Tolerates legacy plain-string entries.
 const mcPlayerName = p => (typeof p === 'string' ? p : (p && p.name) || '');
+
+// ── Activity feed ────────────────────────────────────────────────────────────
+// A live, human-readable feed of server happenings (joins, leaves, deaths,
+// advancements, chat) — the "your server is alive" view. Per-server ring buffer.
+const activityHistory = {};
+const ACTIVITY_MAX = 300;
+let _lastActivity = {}; // serverId -> "kind|text" of the last entry, for light dedup across output paths
+function recordActivity(serverId, kind, text, player) {
+  if (!serverId || !text) return;
+  const sig = kind + '|' + text;
+  if (_lastActivity[serverId] === sig) return; // drop immediate duplicates (line seen on 2 paths)
+  _lastActivity[serverId] = sig;
+  const entry = { kind, text, player: player || '', ts: Date.now() };
+  const buf = activityHistory[serverId] || (activityHistory[serverId] = []);
+  buf.push(entry);
+  if (buf.length > ACTIVITY_MAX) buf.splice(0, buf.length - ACTIVITY_MAX);
+  emit('activity', { serverId, entry });
+}
+// Strip a Minecraft log prefix ("[HH:MM:SS] [Server thread/INFO]: ") to the message.
+const stripLogPrefix = l => l.replace(/^.*?\]:\s*/, '').trim();
+// Broad-but-safe death-message matcher (Minecraft has ~100 variants).
+const MC_DEATH_RE = /^([A-Za-z0-9_]{1,16}) (?:was (?:slain|shot|killed|blown up|fireballed|pummeled|pricked|impaled|skewered|squashed|squished|struck by lightning|doomed|stung|frozen|poked|roasted|burnt|finished|obliterated|blown|shot off|killed by)|drowned|blew up|hit the ground too hard|fell (?:from|off|out of|into|while|too far)|burned to death|went up in flames|walked into (?:fire|the danger zone|a cactus)|discovered the floor was lava|tried to swim in lava|suffocated|starved to death|withered away|froze to death|died|experienced kinetic energy|didn't want to live)\b/;
+const MC_ADV_RE = /^([A-Za-z0-9_]{1,16}) has (?:made the advancement|completed the challenge|reached the goal) \[(.+)\]/;
+// Detect deaths / advancements from a Minecraft log line and add to the feed.
+function parseMinecraftActivity(serverId, line) {
+  const msg = stripLogPrefix(line);
+  const death = msg.match(MC_DEATH_RE);
+  if (death) { recordActivity(serverId, 'death', msg, death[1]); return; }
+  const adv = msg.match(MC_ADV_RE);
+  if (adv) { recordActivity(serverId, 'advancement', `${adv[1]} earned “${adv[2]}”`, adv[1]); return; }
+}
+
 function parsePlayerEvent(serverId, line) {
   const server = appData.servers.find(s => s.id === serverId);
   if (!server) return;
@@ -5073,6 +5108,7 @@ function parsePlayerEvent(serverId, line) {
         title: `➕ ${name} joined ${server.name}`,
         body: `${name} joined the game. ${server.players.length} online.`,
       });
+      recordActivity(serverId, 'join', `${name} joined the game`, name);
     }
     emit('players-updated', { serverId, players: server.players });
     return;
@@ -5091,6 +5127,7 @@ function parsePlayerEvent(serverId, line) {
         title: `➖ ${name} left ${server.name}`,
         body: `${name} left the game. ${server.players.length} online.`,
       });
+      recordActivity(serverId, 'leave', `${name} left the game`, name);
     }
     emit('players-updated', { serverId, players: server.players });
     return;
@@ -5105,7 +5142,13 @@ function parsePlayerEvent(serverId, line) {
       return (existing && typeof existing === 'object') ? existing : { name: nm, joinedAt: Date.now(), health: null };
     });
     emit('players-updated', { serverId, players: server.players });
+    return;
   }
+
+  // Everything else: feed the activity log (deaths, advancements, chat).
+  parseMinecraftActivity(serverId, line);
+  const chatM = stripLogPrefix(line).match(/^<([A-Za-z0-9_]{1,16})>\s(.+)$/);
+  if (chatM) recordActivity(serverId, 'chat', `${chatM[1]}: ${chatM[2]}`, chatM[1]);
 }
 
 // Minecraft-only: parse a `data get entity <name> Health|Pos` reply and update

@@ -238,16 +238,60 @@ function clearConsole() {
 let currentServerTab = 'console';
 function switchServerTab(tab) {
   currentServerTab = tab;
-  for (const t of ['console', 'chat', 'map', 'panel']) {
+  for (const t of ['console', 'activity', 'chat', 'map', 'panel']) {
     const cap  = t.charAt(0).toUpperCase() + t.slice(1);
     const view = document.getElementById('tab' + cap);
     const btn  = document.getElementById('tabBtn' + cap);
     if (view) view.style.display = (t === tab) ? 'flex' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   }
-  if (tab === 'map')   { updateMapView(); }
-  if (tab === 'panel') { updatePanelView(); }
-  if (tab === 'chat')  { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
+  if (tab === 'map')      { updateMapView(); }
+  if (tab === 'panel')    { updatePanelView(); }
+  if (tab === 'chat')     { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
+  if (tab === 'activity') { const o = document.getElementById('activityFeed'); if (o) o.scrollTop = o.scrollHeight; }
+}
+
+// ── Activity feed (the "server is alive" view) ────────────────────────────────
+const ACTIVITY_META = {
+  join:        { icon: '➕', cls: 'act-join'  },
+  leave:       { icon: '➖', cls: 'act-leave' },
+  death:       { icon: '💀', cls: 'act-death' },
+  advancement: { icon: '⭐', cls: 'act-adv'   },
+  chat:        { icon: '💬', cls: 'act-chat'  },
+};
+function activityRowHtml(entry) {
+  const m = ACTIVITY_META[entry.kind] || { icon: '•', cls: '' };
+  const time = new Date(entry.ts || Date.now()).toLocaleTimeString('en-US', { hour12: false });
+  const head = entry.player
+    ? `<img class="act-head" src="https://mc-heads.net/avatar/${encodeURIComponent(entry.player)}/24" onerror="this.style.display='none'">`
+    : `<span class="act-icon-fallback">${m.icon}</span>`;
+  return `<div class="activity-row ${m.cls}">
+    <span class="act-time">${time}</span>
+    <span class="act-icon">${m.icon}</span>
+    ${head}
+    <span class="act-text">${escapeHtml(entry.text || '')}</span>
+  </div>`;
+}
+function appendActivity(entry) {
+  const feed = document.getElementById('activityFeed'); if (!feed) return;
+  const empty = feed.querySelector('.empty-msg-sm'); if (empty) empty.remove();
+  const wasAtBottom = feed.scrollHeight - feed.scrollTop < feed.clientHeight + 80;
+  feed.insertAdjacentHTML('beforeend', activityRowHtml(entry));
+  const rows = feed.querySelectorAll('.activity-row');
+  if (rows.length > 300) rows[0].remove();
+  if (wasAtBottom || currentServerTab === 'activity') feed.scrollTop = feed.scrollHeight;
+}
+async function loadActivity(id) {
+  const feed = document.getElementById('activityFeed'); if (!feed) return;
+  let items = [];
+  try { items = await window.nexus.getActivity(id); } catch(e) {}
+  if (id !== activeId) return;
+  if (!items || !items.length) {
+    feed.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No activity yet — it\'ll fill up as players join, die, earn advancements, and chat.</div>';
+    return;
+  }
+  feed.innerHTML = items.map(activityRowHtml).join('');
+  feed.scrollTop = feed.scrollHeight;
 }
 
 // Web Admin panel embed (Farming Simulator 25 — the dedicated-server web UI).
@@ -842,10 +886,12 @@ async function selectServer(id) {
   const isFs = !!(s && s.game === 'Farming Simulator 25');
   const tabs = document.getElementById('serverTabs');
   if (tabs) tabs.style.display = (isMc || isFs) ? 'flex' : 'none';
+  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = isMc ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = isMc ? '' : 'none';
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = isMc ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
+  if (isMc) loadActivity(id);
   const chatOut = document.getElementById('chatOutput');
   if (chatOut) chatOut.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No chat yet.</div>';
   try {
@@ -2603,6 +2649,7 @@ async function init(){
 function wireEvents(){
   ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
+  window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId) appendActivity(entry); });
   window.nexus.onEventLogged(({serverId})=>{const m=document.getElementById('eventLogModal');if(serverId===activeId && m && m.classList.contains('open')) renderEventLog();});
   window.nexus.onServerStatus(({serverId,status,startedAt})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status=status;s.startedAt=(status==='online')?(startedAt||s.startedAt||Date.now()):null;}if(serverId===activeId){renderHeader();if(status==='online'){startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status='offline';s.startedAt=null;}if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
