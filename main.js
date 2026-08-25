@@ -2624,6 +2624,7 @@ async function createBackup(serverId, label = 'Manual backup', trigger = 'manual
   log(serverId, 'success', `✔ Backup complete: ${label} (${formatBytesNative(size)})`);
   if (trigger !== 'manual') {
     notify('backup', {
+      serverId,
       title: `💾 Backup complete — ${server.name}`,
       body: `${label} (${formatBytesNative(size)})`,
       fields: [
@@ -2999,6 +3000,16 @@ function applySettings() {
   emit('settings-changed', appSettings);
 }
 
+// Per-server Discord webhook override (blank = use the global default). Lets a
+// multi-server user route each server to its own channel.
+ipcMain.handle('set-server-webhook', (e, serverId, url) => {
+  const s = appData.servers.find(sv => sv.id === serverId);
+  if (!s) return { ok: false, error: 'Server not found' };
+  s.discordWebhookUrl = (url || '').trim();
+  saveData();
+  return { ok: true };
+});
+
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 function sendNotification(title, body, urgency = 'normal') {
@@ -3057,22 +3068,35 @@ function postDiscordWebhook(webhookUrl, { title, description, color, fields }) {
 // POST per chat line.
 const ACT_DISCORD_COLORS = { death: 0xED4245, advancement: 0xFEE75C, chat: 0x5865F2 };
 const ACT_DISCORD_ICON   = { death: '💀', advancement: '⭐', chat: '💬' };
-let _discordQueue = [];
+let _discordQueue = [];        // [{ url, embed }] — pending posts, possibly to different channels
 let _discordFlushTimer = null;
 function flushDiscordQueue() {
   clearTimeout(_discordFlushTimer); _discordFlushTimer = null;
   if (!_discordQueue.length) return;
-  if (!appSettings.discordEnabled || !appSettings.discordWebhookUrl) { _discordQueue = []; return; }
-  const embeds = _discordQueue.splice(0, 10);
-  postDiscordEmbeds(appSettings.discordWebhookUrl, embeds).catch(() => {});
-  if (_discordQueue.length) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000); // drain remainder
+  // Group pending embeds by destination webhook so each channel gets one message —
+  // multi-server users may route each server to a different channel. Cap 10 embeds
+  // per message (Discord's limit); anything over stays queued for the next flush.
+  const byUrl = new Map();
+  for (const { url, embed } of _discordQueue) {
+    if (!byUrl.has(url)) byUrl.set(url, []);
+    byUrl.get(url).push(embed);
+  }
+  const overflow = [];
+  for (const [url, embeds] of byUrl) {
+    postDiscordEmbeds(url, embeds.slice(0, 10)).catch(() => {});
+    for (const embed of embeds.slice(10)) overflow.push({ url, embed });
+  }
+  _discordQueue = overflow;
+  if (_discordQueue.length) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000);
 }
 function forwardActivityToDiscord(serverId, kind, text, player) {
-  if (!appSettings.discordEnabled || !appSettings.discordWebhookUrl) return;
+  if (!appSettings.discordEnabled) return;
   // Only the living feed here — join/leave are handled by notify().
   if (kind === 'chat') { if (!appSettings.discordChat) return; }
   else if (kind === 'death' || kind === 'advancement') { if (!appSettings.discordDeaths) return; }
   else return;
+  const url = serverDiscordWebhook(serverId);
+  if (!url) return;
   const server = appData.servers.find(s => s.id === serverId);
   const embed = {
     color: ACT_DISCORD_COLORS[kind] || 0x5865F2,
@@ -3081,7 +3105,7 @@ function forwardActivityToDiscord(serverId, kind, text, player) {
     timestamp: new Date().toISOString(),
   };
   if (player) embed.author.icon_url = `https://mc-heads.net/avatar/${encodeURIComponent(player)}/32`;
-  _discordQueue.push(embed);
+  _discordQueue.push({ url, embed });
   if (_discordQueue.length >= 10) flushDiscordQueue();
   else if (!_discordFlushTimer) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000);
 }
@@ -3089,10 +3113,20 @@ function forwardActivityToDiscord(serverId, kind, text, player) {
 // Discord embed colors per event type.
 const NOTIFY_COLORS = { crash: 0xED4245, start: 0x57F287, stop: 0x99AAB5, backup: 0x5865F2, playerJoin: 0x57F287, playerLeave: 0xFAA61A };
 
+// Resolve which Discord webhook a server posts to: its own per-server override if
+// set, otherwise the global default. This is what makes multi-server setups work —
+// each server can route to its own channel (e.g. #minecraft vs #palworld), and any
+// server without an override still lands in the shared channel.
+function serverDiscordWebhook(serverId) {
+  const s = serverId ? appData.servers.find(sv => sv.id === serverId) : null;
+  return (s && s.discordWebhookUrl && s.discordWebhookUrl.trim()) || appSettings.discordWebhookUrl || '';
+}
+
 // Unified notification dispatcher. Fires a Windows toast (respecting `notifications`
 // + the per-event toggle) AND a Discord webhook (respecting `discordEnabled` + the
 // same per-event toggle). `event` is one of crash|start|stop|backup|playerJoin|playerLeave.
-function notify(event, { title, body, fields, urgency = 'normal' }) {
+// Pass `serverId` so the Discord post routes to that server's own channel when set.
+function notify(event, { title, body, fields, urgency = 'normal', serverId }) {
   const toggleKey = {
     crash: 'notifyOnCrash', start: 'notifyOnStart', stop: 'notifyOnStop',
     backup: 'notifyOnBackup', playerJoin: 'notifyOnPlayerJoin', playerLeave: 'notifyOnPlayerJoin',
@@ -3102,8 +3136,9 @@ function notify(event, { title, body, fields, urgency = 'normal' }) {
 
   sendNotification(title, body, urgency);
 
-  if (appSettings.discordEnabled && appSettings.discordWebhookUrl) {
-    postDiscordWebhook(appSettings.discordWebhookUrl, {
+  const url = serverDiscordWebhook(serverId);
+  if (appSettings.discordEnabled && url) {
+    postDiscordWebhook(url, {
       title, description: body, color: NOTIFY_COLORS[event], fields,
     }).catch(() => {});
   }
@@ -4596,6 +4631,7 @@ async function startServerById(id) {
     logEvent(id, 'START', `${server.name} started (PID ${proc.pid})`);
     log(id, 'success', `✔ Process spawned (PID: ${proc.pid})`);
     notify('start', {
+      serverId: id,
       title: `▶ ${server.name} started`,
       body: `${server.name} is now running.`,
       fields: [
@@ -4659,6 +4695,7 @@ async function startServerById(id) {
         }
         emit('server-crashed', { serverId:id, code, uptime, isCrash });
         notify('crash', {
+          serverId: id,
           title: `⚠ ${server.name} crashed`,
           body: `${server.name} stopped unexpectedly after ${uptime}s (exit code ${code}).`,
           urgency: 'critical',
@@ -4672,6 +4709,7 @@ async function startServerById(id) {
         // Clean or intentional shutdown
         logEvent(id, 'STOP', `stopped cleanly after ${uptime}s (code ${code == null ? 'n/a' : code})`);
         notify('stop', {
+          serverId: id,
           title: `⏹ ${server.name} stopped`,
           body: `${server.name} has shut down.`,
           fields: [
@@ -4956,8 +4994,9 @@ function broadcastWarning(serverId, message) {
     // spaces (only the first word shows), so send with underscores.
     rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, `Broadcast ${message.replace(/\s+/g, '_')}`).catch(() => {});
   }
-  if (appSettings.discordEnabled && appSettings.discordWebhookUrl) {
-    postDiscordWebhook(appSettings.discordWebhookUrl, {
+  const warnUrl = serverDiscordWebhook(serverId);
+  if (appSettings.discordEnabled && warnUrl) {
+    postDiscordWebhook(warnUrl, {
       title: `⏳ ${server?.name || 'Server'}`,
       description: message,
       color: NOTIFY_COLORS.playerLeave,
@@ -5154,6 +5193,7 @@ function parsePlayerEvent(serverId, line) {
     if (!server.players.some(p => mcPlayerName(p) === name)) {
       server.players.push({ name, joinedAt: Date.now(), health: null });
       notify('playerJoin', {
+        serverId,
         title: `➕ ${name} joined ${server.name}`,
         body: `${name} joined the game. ${server.players.length} online.`,
       });
@@ -5173,6 +5213,7 @@ function parsePlayerEvent(serverId, line) {
     if (wasOnline) {
       noteLeave(serverId);
       notify('playerLeave', {
+        serverId,
         title: `➖ ${name} left ${server.name}`,
         body: `${name} left the game. ${server.players.length} online.`,
       });

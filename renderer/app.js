@@ -2002,8 +2002,35 @@ async function renderNetworkCard() {
       <button class="btn-firewall" onclick="addFirewallRule('${s.id}')" style="width:100%; margin-top:10px; padding:9px 12px; background:rgba(0,229,255,0.06); border:1px solid rgba(0,229,255,0.35); color:var(--accent); border-radius:6px; cursor:pointer; font-family:'Exo 2',sans-serif; font-size:12px; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.15s">
         <span>🛡️</span> Open Port ${s.port} in Windows Firewall
       </button>
-      <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}.</div>`;
+      <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}.</div>
+      <div class="network-row" style="flex-direction:column; align-items:stretch; gap:6px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px">
+        <div class="network-label" style="display:flex; align-items:center; gap:6px">💬 Discord webhook <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
+        <div style="display:flex; gap:6px; align-items:center">
+          <input type="text" id="svWebhookInput" class="form-input" placeholder="Blank = use global webhook"
+            value="${escapeHtml(s.discordWebhookUrl||'')}" style="flex:1; pointer-events:all; font-size:11px"
+            onchange="saveServerWebhook(this.value)">
+          <button class="btn-copy" style="pointer-events:all; padding:4px 8px" title="Send a test message to this channel" onclick="testServerWebhook(this)">🔔</button>
+        </div>
+        <div class="network-hint" style="margin-top:2px">Route <b>${escapeHtml(s.name)}</b>'s feed to its own channel. Leave blank to use the global webhook from Settings → Discord.</div>
+      </div>`;
   } catch(e) { body.innerHTML='<div class="empty-msg-sm">Could not fetch network info.</div>'; }
+}
+async function saveServerWebhook(value) {
+  const s = getActive(); if (!s) return;
+  const url = (value || '').trim();
+  s.discordWebhookUrl = url; // keep the in-memory copy in sync so routing is immediate
+  try { await window.nexus.setServerWebhook(s.id, url); } catch(e) {}
+  showToast('💬', url ? 'This server will post to its own channel' : 'Cleared — this server uses the global webhook');
+}
+async function testServerWebhook(btn) {
+  const url = (document.getElementById('svWebhookInput')?.value || '').trim();
+  if (!url) { showToast('⚠️', 'Enter a webhook URL first, or leave blank to use the global one.'); return; }
+  const old = btn.textContent; btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await window.nexus.testDiscordWebhook(url);
+    showToast(r.ok ? '✅' : '❌', r.ok ? 'Test sent — check that channel.' : (r.error || 'Failed to send.'));
+  } catch(e) { showToast('❌', e.message); }
+  finally { btn.disabled = false; btn.textContent = old; }
 }
 
 // ── Java check ────────────────────────────────────────────────────────────────
