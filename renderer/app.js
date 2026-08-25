@@ -2316,7 +2316,7 @@ function closeSettingsModal() {
 }
 function applySettingsToUI() {
   if (!appSettings) return;
-  ['notifications','notifyOnCrash','notifyOnStart','notifyOnStop','notifyOnBackup','notifyOnPlayerJoin','discordEnabled','startMinimized','minimizeToTray'].forEach(key => {
+  ['notifications','notifyOnCrash','notifyOnStart','notifyOnStop','notifyOnBackup','notifyOnPlayerJoin','discordEnabled','discordChat','discordDeaths','startMinimized','minimizeToTray'].forEach(key => {
     const el=document.getElementById(`set${key[0].toUpperCase()+key.slice(1)}`); if(!el) return;
     const val=appSettings[key]||false; el.classList.toggle('on',val);
     const v=el.querySelector('.cfg-bool-val'); if(v) v.textContent=val?'ON':'OFF';

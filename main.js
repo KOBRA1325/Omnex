@@ -2951,10 +2951,7 @@ ipcMain.handle('delete-mod', (e, { serverId, modPath }) => {
 const SETTINGS_FILE = path.join(USER_DATA, 'settings.json');
 
 function loadSettings() {
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-  } catch(e) {}
-  return {
+  const defaults = {
     startMinimized:      false,
     minimizeToTray:      false,
     notifications:       true,
@@ -2965,6 +2962,8 @@ function loadSettings() {
     notifyOnPlayerJoin:  false,
     discordEnabled:      false,
     discordWebhookUrl:   '',
+    discordChat:         true,  // forward in-game chat to Discord
+    discordDeaths:       true,  // forward deaths & advancements to Discord
     maxConsoleLines:     500,
     defaultBackupKeep:   10,
     autoStartServers:    [],
@@ -2973,6 +2972,12 @@ function loadSettings() {
     consoleFontSize:     12,
     appTextScale:        1,
   };
+  // Merge saved settings over defaults so keys added in newer versions still get
+  // their default for users whose settings.json predates them.
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) return { ...defaults, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) };
+  } catch(e) {}
+  return defaults;
 }
 
 function saveSettings(settings) {
@@ -3006,18 +3011,16 @@ function sendNotification(title, body, urgency = 'normal') {
   } catch(e) {}
 }
 
-// Post a rich embed to a Discord webhook. Resolves { ok, error } and never throws.
-function postDiscordWebhook(webhookUrl, { title, description, color, fields }) {
+// Low-level: POST an array of embeds (Discord allows up to 10 per message) to a
+// webhook. Resolves { ok, error } and never throws.
+function postDiscordEmbeds(webhookUrl, embeds) {
   return new Promise(resolve => {
     if (!webhookUrl || !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//i.test(webhookUrl.trim())) {
       return resolve({ ok: false, error: 'Invalid Discord webhook URL' });
     }
     let payload;
-    try {
-      const embed = { title, description, color: typeof color === 'number' ? color : 0x5865F2, timestamp: new Date().toISOString(), footer: { text: 'Omnex' } };
-      if (Array.isArray(fields) && fields.length) embed.fields = fields;
-      payload = JSON.stringify({ username: 'Omnex', embeds: [embed] });
-    } catch(e) { return resolve({ ok: false, error: 'Failed to build payload' }); }
+    try { payload = JSON.stringify({ username: 'Omnex', embeds: (embeds || []).slice(0, 10) }); }
+    catch(e) { return resolve({ ok: false, error: 'Failed to build payload' }); }
 
     let u;
     try { u = new URL(webhookUrl.trim()); } catch(e) { return resolve({ ok: false, error: 'Invalid webhook URL' }); }
@@ -3036,6 +3039,51 @@ function postDiscordWebhook(webhookUrl, { title, description, color, fields }) {
     req.write(payload);
     req.end();
   });
+}
+
+// Post a single rich embed to a Discord webhook. Resolves { ok, error }, never throws.
+function postDiscordWebhook(webhookUrl, { title, description, color, fields }) {
+  const embed = { title, description, color: typeof color === 'number' ? color : 0x5865F2, timestamp: new Date().toISOString(), footer: { text: 'Omnex' } };
+  if (Array.isArray(fields) && fields.length) embed.fields = fields;
+  return postDiscordEmbeds(webhookUrl, [embed]);
+}
+
+// ── Live activity → Discord (the "your server is alive" feed) ────────────────
+// recordActivity() is the single choke point for join/leave/death/advancement/chat.
+// Join/leave already reach Discord through notify(); here we forward the rest of the
+// *living* feed — deaths, advancements, and chat — so a community can watch the
+// server actually happen in their channel, not just "server started". Batched (up to
+// 10 embeds every ~2s) to stay under Discord's webhook rate limit and avoid one HTTP
+// POST per chat line.
+const ACT_DISCORD_COLORS = { death: 0xED4245, advancement: 0xFEE75C, chat: 0x5865F2 };
+const ACT_DISCORD_ICON   = { death: '💀', advancement: '⭐', chat: '💬' };
+let _discordQueue = [];
+let _discordFlushTimer = null;
+function flushDiscordQueue() {
+  clearTimeout(_discordFlushTimer); _discordFlushTimer = null;
+  if (!_discordQueue.length) return;
+  if (!appSettings.discordEnabled || !appSettings.discordWebhookUrl) { _discordQueue = []; return; }
+  const embeds = _discordQueue.splice(0, 10);
+  postDiscordEmbeds(appSettings.discordWebhookUrl, embeds).catch(() => {});
+  if (_discordQueue.length) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000); // drain remainder
+}
+function forwardActivityToDiscord(serverId, kind, text, player) {
+  if (!appSettings.discordEnabled || !appSettings.discordWebhookUrl) return;
+  // Only the living feed here — join/leave are handled by notify().
+  if (kind === 'chat') { if (!appSettings.discordChat) return; }
+  else if (kind === 'death' || kind === 'advancement') { if (!appSettings.discordDeaths) return; }
+  else return;
+  const server = appData.servers.find(s => s.id === serverId);
+  const embed = {
+    color: ACT_DISCORD_COLORS[kind] || 0x5865F2,
+    author: { name: `${ACT_DISCORD_ICON[kind] || ''} ${text}`.slice(0, 256) },
+    footer: { text: server ? server.name : 'Omnex' },
+    timestamp: new Date().toISOString(),
+  };
+  if (player) embed.author.icon_url = `https://mc-heads.net/avatar/${encodeURIComponent(player)}/32`;
+  _discordQueue.push(embed);
+  if (_discordQueue.length >= 10) flushDiscordQueue();
+  else if (!_discordFlushTimer) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000);
 }
 
 // Discord embed colors per event type.
@@ -5076,6 +5124,7 @@ function recordActivity(serverId, kind, text, player) {
   buf.push(entry);
   if (buf.length > ACTIVITY_MAX) buf.splice(0, buf.length - ACTIVITY_MAX);
   emit('activity', { serverId, entry });
+  forwardActivityToDiscord(serverId, kind, text, player);
 }
 // Strip a Minecraft log prefix ("[HH:MM:SS] [Server thread/INFO]: ") to the message.
 const stripLogPrefix = l => l.replace(/^.*?\]:\s*/, '').trim();

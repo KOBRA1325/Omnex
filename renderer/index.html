@@ -721,6 +721,26 @@
           </div>
           <div id="discordTestResult" class="form-hint" style="display:none"></div>
         </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Forward in-game chat</div>
+            <div class="settings-row-desc">Post players' chat messages to Discord — a live window into the server</div>
+          </div>
+          <button class="cfg-bool-btn" id="setDiscordChat" onclick="toggleSetting('discordChat', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Forward deaths &amp; advancements</div>
+            <div class="settings-row-desc">Post the fun moments — deaths and earned advancements — to Discord</div>
+          </div>
+          <button class="cfg-bool-btn" id="setDiscordDeaths" onclick="toggleSetting('discordDeaths', this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
+        </div>
       </div>
 
       <div class="settings-section">
