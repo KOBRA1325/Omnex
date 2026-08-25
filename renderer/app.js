@@ -324,7 +324,8 @@ function openPanelExternal() {
 
 // Chat: detect "<Name> message" lines and mirror them into the Chat tab.
 function parseChatLine(text) {
-  const m = text.match(/<([A-Za-z0-9_]{1,16})>\s(.+)$/);
+  // Trim trailing CR/whitespace first — CRLF-sourced lines otherwise break the `$` anchor.
+  const m = String(text).replace(/[\r\n]+$/, '').match(/<([A-Za-z0-9_]{1,16})>\s(.+)$/);
   return m ? { name: m[1], msg: m[2] } : null;
 }
 function appendChat(name, msg, time) {

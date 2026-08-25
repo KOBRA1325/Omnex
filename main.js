@@ -4561,7 +4561,7 @@ async function startServerById(id) {
     // Tail those log files so their output shows up in the Live Console.
     startLogTailer(id, server);
     proc.stdout.on('data', d => {
-      d.toString().split('\n').filter(l=>l.trim()).forEach(l => {
+      d.toString().split(/\r?\n/).filter(l=>l.trim()).forEach(l => {
         // Suppress /list command output from flooding the console
         if (/There are \d+ of a max(imum)? of \d+ players online/i.test(l)) {
           parsePlayerEvent(id, l); // still parse for player names
@@ -4577,7 +4577,7 @@ async function startServerById(id) {
       });
     });
     proc.stderr.on('data', d => {
-      d.toString().split('\n').filter(l=>l.trim()).forEach(l => {
+      d.toString().split(/\r?\n/).filter(l=>l.trim()).forEach(l => {
         if (/There are \d+ of a max(imum)? of \d+ players online/i.test(l)) {
           parsePlayerEvent(id, l);
           return;
