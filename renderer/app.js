@@ -207,8 +207,9 @@ function appendLog(type, text, ts) {
     // main process is still running the server).
     if (/has the following entity data:/.test(l)) return;
     if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
+    // Minecraft chat has its own Chat tab (+ Activity feed) — keep it out of the console.
+    if (mc) { const c = parseChatLine(l); if (c) { appendChat(c.name, c.msg, time); return; } }
     _consoleBuf.push({ type, text: l, time });
-    if (mc) { const c = parseChatLine(l); if (c) appendChat(c.name, c.msg, time); }
   });
   if (!_consoleRaf) _consoleRaf = requestAnimationFrame(_flushConsole);
 }
