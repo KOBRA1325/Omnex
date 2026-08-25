@@ -448,47 +448,6 @@ input, textarea, select, .console-input, .console-output, .config-input {
 .activity-row.act-adv   .act-text { color: #ffe08a; }
 .activity-row.act-chat  .act-text { color: #b8c8dd; }
 
-/* Cockpit / Overview tab (the "server is alive" glance view) */
-.cockpit { background: #07090d; }
-.cockpit-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; min-height: 0; }
-.cockpit-scroll::-webkit-scrollbar { width: 4px; }
-.cockpit-scroll::-webkit-scrollbar-thumb { background: #1e2535; border-radius: 2px; }
-.cockpit-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
-.ctile {
-  background: linear-gradient(180deg, rgba(0,229,255,0.05), rgba(255,255,255,0.015));
-  border: 1px solid var(--border); border-radius: 10px; padding: 14px 12px; text-align: center;
-}
-.ctile-val {
-  font-family: 'Share Tech Mono', monospace; font-size: 24px; font-weight: 700;
-  color: var(--text-bright); line-height: 1.1; letter-spacing: 0.5px;
-}
-.ctile-lbl { font-family: 'Rajdhani', sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-top: 4px; }
-.cockpit-section { margin-bottom: 20px; }
-.cockpit-h {
-  font-family: 'Rajdhani', sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 1.2px; color: var(--text-dim); margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
-}
-.cockpit-h-sub { font-size: 11px; font-weight: 600; color: var(--green); letter-spacing: 0.5px; }
-.crew-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-.crew-card {
-  display: flex; align-items: center; gap: 11px; padding: 10px 12px;
-  background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 10px;
-  border-left: 3px solid var(--green);
-}
-.crew-head { width: 40px; height: 40px; border-radius: 6px; image-rendering: pixelated; flex-shrink: 0; background: var(--surface); }
-.crew-body { min-width: 0; flex: 1; }
-.crew-name {
-  font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 15px; color: var(--text-bright);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.crew-sub { display: flex; align-items: center; gap: 12px; margin-top: 3px; font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); }
-.crew-hp { display: inline-flex; align-items: center; gap: 6px; color: var(--text-bright); }
-.crew-hp-bar { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
-.crew-hp-bar i { display: block; height: 100%; border-radius: 3px; }
-.crew-hp-dim { color: #3a4658; }
-.cockpit-playtime { white-space: nowrap; }
-.cockpit-recent { display: flex; flex-direction: column; gap: 2px; }
-
 /* Map tab (player radar) */
 .map-modebar {
   display: flex; align-items: center; gap: 6px;

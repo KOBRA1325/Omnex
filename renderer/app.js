@@ -239,14 +239,13 @@ function clearConsole() {
 let currentServerTab = 'console';
 function switchServerTab(tab) {
   currentServerTab = tab;
-  for (const t of ['overview', 'console', 'activity', 'chat', 'map', 'panel']) {
+  for (const t of ['console', 'activity', 'chat', 'map', 'panel']) {
     const cap  = t.charAt(0).toUpperCase() + t.slice(1);
     const view = document.getElementById('tab' + cap);
     const btn  = document.getElementById('tabBtn' + cap);
     if (view) view.style.display = (t === tab) ? 'flex' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   }
-  if (tab === 'overview') { renderCockpit(); }
   if (tab === 'map')      { updateMapView(); }
   if (tab === 'panel')    { updatePanelView(); }
   if (tab === 'chat')     { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
@@ -294,68 +293,6 @@ async function loadActivity(id) {
   }
   feed.innerHTML = items.map(activityRowHtml).join('');
   feed.scrollTop = feed.scrollHeight;
-}
-
-// ── Cockpit / Overview (the "leave it open on a second monitor" view) ─────────
-// A glanceable overview of one server: live stat tiles, the crew (players with
-// heads + health + playtime), and the most recent activity. It reuses data we
-// already stream (players, stats, activity) and is kept live by the same timers.
-function renderCockpit() {
-  const s = getActive();
-  renderCockpitPlayers(s ? (s.players || []) : []);
-  loadCockpitActivity(s ? s.id : null);
-  const up = document.getElementById('ckUptime');
-  if (up) up.textContent = (s && s.status === 'online') ? formatUptime(uptimeSec) : '—';
-  if (!s || s.status !== 'online') {
-    ['ckCpu', 'ckRam'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '—'; });
-  }
-}
-function renderCockpitPlayers(players) {
-  const grid = document.getElementById('cockpitPlayers'); if (!grid) return;
-  players = players || [];
-  const cnt = document.getElementById('ckCrewCount'); if (cnt) cnt.textContent = players.length ? `${players.length} online` : '';
-  const pcTile = document.getElementById('ckPlayers'); if (pcTile) pcTile.textContent = String(players.length);
-  if (!players.length) {
-    grid.innerHTML = '<div class="empty-msg-sm" style="padding:16px">No one\'s on right now. When players join, they\'ll show up here.</div>';
-    return;
-  }
-  grid.innerHTML = players.map(p => {
-    const name = typeof p === 'string' ? p : (p.name || '');
-    let hp = '';
-    if (typeof p === 'object' && p.health != null) {
-      const pct = Math.max(0, Math.min(100, (p.health / 20) * 100));
-      const col = p.health > 12 ? '#3ecf5b' : p.health > 6 ? '#e8b84b' : '#e05a5a';
-      hp = `<span class="crew-hp" title="${p.health} / 20 HP"><span class="crew-hp-bar"><i style="width:${pct}%;background:${col}"></i></span>${p.health}</span>`;
-    } else if (typeof p === 'object') {
-      hp = `<span class="crew-hp crew-hp-dim" title="Waiting for health…">❤ —</span>`;
-    }
-    let pt = '';
-    if (typeof p === 'object' && p.joinedAt) pt = `<span class="cockpit-playtime" data-joined="${p.joinedAt}">⏱ ${formatSession(Date.now() - p.joinedAt)}</span>`;
-    return `<div class="crew-card">
-      <img class="crew-head" src="https://mc-heads.net/avatar/${encodeURIComponent(name)}/40" onerror="this.style.visibility='hidden'">
-      <div class="crew-body">
-        <div class="crew-name">${escapeHtml(name)}</div>
-        <div class="crew-sub">${hp}${pt}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
-async function loadCockpitActivity(id) {
-  const box = document.getElementById('cockpitActivity'); if (!box) return;
-  if (!id) { box.innerHTML = '<div class="empty-msg-sm" style="padding:12px">Nothing yet.</div>'; return; }
-  let items = [];
-  try { items = await window.nexus.getActivity(id); } catch(e) {}
-  if (id !== activeId) return;
-  items = (items || []).slice(-8).reverse(); // newest first, capped
-  box.innerHTML = items.length ? items.map(activityRowHtml).join('')
-    : '<div class="empty-msg-sm" style="padding:12px">Nothing yet.</div>';
-}
-function prependCockpitActivity(entry) {
-  const box = document.getElementById('cockpitActivity'); if (!box) return;
-  const empty = box.querySelector('.empty-msg-sm'); if (empty) empty.remove();
-  box.insertAdjacentHTML('afterbegin', activityRowHtml(entry));
-  const rows = box.querySelectorAll('.activity-row');
-  for (let i = rows.length - 1; i >= 8; i--) rows[i].remove();
 }
 
 // Web Admin panel embed (Farming Simulator 25 — the dedicated-server web UI).
@@ -951,13 +888,11 @@ async function selectServer(id) {
   const isFs = !!(s && s.game === 'Farming Simulator 25');
   const tabs = document.getElementById('serverTabs');
   if (tabs) tabs.style.display = (isMc || isFs) ? 'flex' : 'none';
-  const bOver = document.getElementById('tabBtnOverview'); if (bOver) bOver.style.display = isMc ? '' : 'none';
   const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = isMc ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = isMc ? '' : 'none';
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = isMc ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
-  // Minecraft opens on the cockpit (the "server is alive" overview); everything else on the console.
-  switchServerTab(isMc ? 'overview' : 'console');
+  switchServerTab('console');
   if (isMc) loadActivity(id);
   const chatOut = document.getElementById('chatOutput');
   if (chatOut) chatOut.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No chat yet.</div>';
@@ -976,16 +911,13 @@ async function selectServer(id) {
       renderSchedules();
       renderBackupCardWithData(s, bundle.backups||[], bundle.backupSettings||{});
       renderNotesFromBundle(bundle);
-      if (s) s.players = bundle.players || [];
       renderPlayerList(bundle.players||[]);
     } else {
-      if (s) s.players = [];
       renderSchedules(); renderBackupCard(); renderNotes(); renderPlayerList([]);
     }
   } catch(e) {
     renderSchedules(); renderBackupCard(); renderNotes(); renderPlayerList([]);
   }
-  if (isMc) renderCockpit();
   renderConfigCard(); renderNetworkCard();
   startStatsPolling();
   if (s?.status === 'online') startUptimeCounter();
@@ -1110,11 +1042,6 @@ function startUptimeCounter() {
   const tick = () => {
     uptimeSec = Math.floor((Date.now() - uptimeStart) / 1000);
     const el = document.getElementById('statUptime'); if(el) el.textContent = formatUptime(uptimeSec);
-    const cu = document.getElementById('ckUptime'); if(cu) cu.textContent = formatUptime(uptimeSec);
-    document.querySelectorAll('.cockpit-playtime[data-joined]').forEach(pl => {
-      const j = parseInt(pl.getAttribute('data-joined'), 10);
-      if (j) pl.textContent = `⏱ ${formatSession(Date.now() - j)}`;
-    });
   };
   tick(); // paint immediately so switching servers shows the right value at once
   uptimeInterval = setInterval(tick, 1000);
@@ -1133,8 +1060,6 @@ function renderStats(stats) {
   if(ram) ram.textContent = stats.systemRam+'%';
   if(bar_cpu) bar_cpu.style.width = stats.systemCpu+'%';
   if(bar_ram) bar_ram.style.width = stats.systemRam+'%';
-  const ckc=document.getElementById('ckCpu'); if(ckc) ckc.textContent = stats.systemCpu+'%';
-  const ckr=document.getElementById('ckRam'); if(ckr) ckr.textContent = stats.systemRam+'%';
   pushChartData(stats.systemCpu||0, stats.systemRam||0);
 }
 function pushChartData(cpu, ram) {
@@ -2726,7 +2651,7 @@ async function init(){
 function wireEvents(){
   ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
-  window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId){ appendActivity(entry); prependCockpitActivity(entry); } });
+  window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId) appendActivity(entry); });
   window.nexus.onEventLogged(({serverId})=>{const m=document.getElementById('eventLogModal');if(serverId===activeId && m && m.classList.contains('open')) renderEventLog();});
   window.nexus.onServerStatus(({serverId,status,startedAt})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status=status;s.startedAt=(status==='online')?(startedAt||s.startedAt||Date.now()):null;}if(serverId===activeId){renderHeader();if(status==='online'){startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status='offline';s.startedAt=null;}if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});
@@ -2749,7 +2674,7 @@ function wireEvents(){
   });
   window.nexus.onInstallError(({serverId,error})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='error';if(serverId===activeId)renderHeader();showToast('❌',error||'Install failed');});
   window.nexus.onConsoleProgress(({serverId,text})=>{if(serverId!==activeId)return;const out=document.getElementById('consoleOutput');if(!out)return;let p=out.querySelector('.progress-line');if(!p){p=document.createElement('div');p.className='log-line progress-line';out.appendChild(p);}p.innerHTML=`<span class="log-ts">${new Date().toLocaleTimeString('en-US',{hour12:false})}</span><span class="log-info">${escapeHtml(text)}</span>`;out.scrollTop=out.scrollHeight;});
-  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){renderPlayerList(players);renderCockpitPlayers(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';}});
+  window.nexus.onPlayersUpdated(({serverId,players})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.players=players;if(serverId===activeId){renderPlayerList(players);const el=document.getElementById('statPlayers');if(el)el.textContent=players.length>0?String(players.length):'0';}});
   window.nexus.onSettingsChanged(settings=>{appSettings=settings;applySettingsToUI();if(settings.consoleFontSize){const o=document.getElementById('consoleOutput');if(o)o.style.fontSize=settings.consoleFontSize+'px';}});
   window.nexus.onServerCrashed(({serverId,code})=>{const s=servers.find(sv=>sv.id===serverId);if(s)s.status='crashed';if(serverId===activeId)renderHeader();showToast('💥',`${s?.name||'Server'} crashed (code ${code})`);if(currentView==='dashboard')renderDashboard();});
   window.nexus.onAppUpdate(({latest, url})=>{ showUpdateBanner(latest, url); });
