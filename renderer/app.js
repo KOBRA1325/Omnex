@@ -2013,11 +2013,15 @@ async function renderNetworkCard() {
         </div>
         <div class="network-hint" style="margin-top:2px">Route <b>${escapeHtml(s.name)}</b>'s feed to its own channel. Leave blank to use the global webhook from Settings → Discord.</div>
         <div class="network-label" style="display:flex; align-items:center; gap:6px; margin-top:10px">🔑 Command access <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
-        <input type="text" id="svAllowInput" class="form-input" placeholder="Discord user IDs, comma-separated"
-          value="${escapeHtml(s.discordAllowedUsers||'')}" style="pointer-events:all; font-size:11px"
-          onchange="saveServerAllowlist(this.value)">
+        <div style="display:flex; gap:6px; align-items:center">
+          <input type="text" id="svAllowAddInput" class="form-input" placeholder="Discord user ID, press Enter" style="flex:1; pointer-events:all; font-size:11px"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();addServerAllowUser();}">
+          <button class="btn-copy" style="pointer-events:all; padding:4px 9px" title="Add user" onclick="addServerAllowUser()">+</button>
+        </div>
+        <div class="allow-chips" id="svAllowChips"></div>
         <div class="network-hint" style="margin-top:2px">These users may run <b>${escapeHtml(s.name)}</b>'s commands (/start /stop /restart /backup). Admins in Settings → Discord can control every server. /status is open to anyone.</div>
       </div>`;
+      renderAllowChips('svAllowChips', parseIds(s.discordAllowedUsers), removeServerAllowUser);
   } catch(e) { body.innerHTML='<div class="empty-msg-sm">Could not fetch network info.</div>'; }
 }
 async function saveServerWebhook(value) {
@@ -2027,12 +2031,71 @@ async function saveServerWebhook(value) {
   try { await window.nexus.setServerWebhook(s.id, url); } catch(e) {}
   showToast('💬', url ? 'This server will post to its own channel' : 'Cleared — this server uses the global webhook');
 }
-async function saveServerAllowlist(value) {
+// ── Discord allowlist chips (avatar + name, instead of raw ID strings) ────────
+function parseIds(str) { return String(str || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean); }
+const _discordUserCache = {}; // id -> { username, avatarUrl } | { error }
+async function resolveDiscordUser(id) {
+  if (_discordUserCache[id]) return _discordUserCache[id];
+  try {
+    const r = await window.nexus.resolveDiscordUser(id);
+    _discordUserCache[id] = r.ok ? { username: r.username, avatarUrl: r.avatarUrl } : { error: r.error };
+  } catch(e) { _discordUserCache[id] = { error: 'x' }; }
+  return _discordUserCache[id];
+}
+// Render a list of user IDs as removable avatar chips into `containerId`.
+function renderAllowChips(containerId, ids, onRemove) {
+  const box = document.getElementById(containerId); if (!box) return;
+  if (!ids.length) { box.innerHTML = '<div class="allow-empty">No one added yet.</div>'; return; }
+  box.innerHTML = ids.map(id => `<span class="allow-chip" data-id="${escapeHtml(id)}">
+      <img class="allow-chip-av" alt="" style="display:none">
+      <span class="allow-chip-name">${escapeHtml(id)}</span>
+      <button class="allow-chip-x" title="Remove">×</button>
+    </span>`).join('');
+  box.querySelectorAll('.allow-chip').forEach(chip => {
+    const id = chip.getAttribute('data-id');
+    chip.querySelector('.allow-chip-x').onclick = () => onRemove(id);
+    resolveDiscordUser(id).then(u => {
+      const av = chip.querySelector('.allow-chip-av'), nm = chip.querySelector('.allow-chip-name');
+      if (u && u.avatarUrl) { av.src = u.avatarUrl; av.style.display = ''; }
+      if (u && u.username) nm.textContent = u.username;
+      if (u && u.error === 'no-token') chip.title = 'Save the bot token to load names';
+    });
+  });
+}
+// Global admin list
+function getAdminIds() { return parseIds(appSettings.discordBotAllowedUsers); }
+async function addAdminUser() {
+  const inp = document.getElementById('botAdminAddInput'); if (!inp) return;
+  const id = inp.value.trim();
+  if (!/^\d{5,20}$/.test(id)) { showToast('⚠️', 'Enter a numeric Discord user ID.'); return; }
+  const ids = getAdminIds(); if (!ids.includes(id)) ids.push(id);
+  appSettings.discordBotAllowedUsers = ids.join(', ');
+  inp.value = '';
+  await saveDiscordBot();
+  renderAllowChips('botAdminChips', getAdminIds(), removeAdminUser);
+}
+async function removeAdminUser(id) {
+  appSettings.discordBotAllowedUsers = getAdminIds().filter(x => x !== id).join(', ');
+  await saveDiscordBot();
+  renderAllowChips('botAdminChips', getAdminIds(), removeAdminUser);
+}
+// Per-server list
+function getServerAllowIds() { const s = getActive(); return s ? parseIds(s.discordAllowedUsers) : []; }
+async function addServerAllowUser() {
   const s = getActive(); if (!s) return;
-  const ids = (value || '').trim();
-  s.discordAllowedUsers = ids; // keep in-memory copy in sync
-  try { await window.nexus.setServerAllowlist(s.id, ids); } catch(e) {}
-  showToast('🔑', ids ? 'Command access updated for this server' : 'Cleared — only global admins can control this server');
+  const inp = document.getElementById('svAllowAddInput'); if (!inp) return;
+  const id = inp.value.trim();
+  if (!/^\d{5,20}$/.test(id)) { showToast('⚠️', 'Enter a numeric Discord user ID.'); return; }
+  const ids = getServerAllowIds(); if (!ids.includes(id)) ids.push(id);
+  s.discordAllowedUsers = ids.join(', '); inp.value = '';
+  try { await window.nexus.setServerAllowlist(s.id, s.discordAllowedUsers); } catch(e) {}
+  renderAllowChips('svAllowChips', getServerAllowIds(), removeServerAllowUser);
+}
+async function removeServerAllowUser(id) {
+  const s = getActive(); if (!s) return;
+  s.discordAllowedUsers = getServerAllowIds().filter(x => x !== id).join(', ');
+  try { await window.nexus.setServerAllowlist(s.id, s.discordAllowedUsers); } catch(e) {}
+  renderAllowChips('svAllowChips', getServerAllowIds(), removeServerAllowUser);
 }
 async function testServerWebhook(btn) {
   const url = (document.getElementById('svWebhookInput')?.value || '').trim();
@@ -2363,7 +2426,7 @@ function applySettingsToUI() {
   const webhookEl=document.getElementById('setDiscordWebhookUrl');
   if(webhookEl) webhookEl.value=appSettings.discordWebhookUrl||'';
   const botTok=document.getElementById('setDiscordBotToken'); if(botTok) botTok.value=appSettings.discordBotToken||'';
-  const botAllow=document.getElementById('setDiscordBotAllowed'); if(botAllow) botAllow.value=appSettings.discordBotAllowedUsers||'';
+  try { renderAllowChips('botAdminChips', getAdminIds(), removeAdminUser); } catch(e) {}
   try { window.nexus.getDiscordBotStatus().then(renderBotStatus).catch(()=>{}); } catch(e) {}
   const sels={setMaxConsoleLines:'maxConsoleLines',setConsoleFontSize:'consoleFontSize',setDefaultBackupKeep:'defaultBackupKeep',setAppTextScale:'appTextScale'};
   Object.entries(sels).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&appSettings[key]!==undefined)el.value=String(appSettings[key]);});
@@ -2414,10 +2477,9 @@ async function saveDiscordBot() {
   const cfg = {
     enabled: !!appSettings.discordBotEnabled,
     token:   (document.getElementById('setDiscordBotToken')?.value || '').trim(),
-    allowed: (document.getElementById('setDiscordBotAllowed')?.value || '').trim(),
+    allowed: appSettings.discordBotAllowedUsers || '', // managed by the admin chips
   };
   appSettings.discordBotToken = cfg.token;
-  appSettings.discordBotAllowedUsers = cfg.allowed;
   try { await window.nexus.saveDiscordBot(cfg); showToast('🤖', cfg.enabled ? 'Bot settings saved — connecting…' : 'Bot settings saved'); }
   catch(e) { showToast('❌', e.message || 'Failed to save'); }
 }

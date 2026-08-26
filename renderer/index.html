@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net data:; frame-src 'self' http: https:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -759,9 +759,13 @@
             <input type="password" class="form-input" id="setDiscordBotToken" placeholder="Paste your bot token" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
           </div>
           <div>
-            <label class="form-label">Admin User IDs <span style="color:var(--text-dim); font-weight:400">(all servers, comma-separated)</span></label>
-            <input type="text" class="form-input" id="setDiscordBotAllowed" placeholder="e.g. 123456789012345678, 987654321098765432" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
-            <div class="form-hint">These users can run commands on <b>every</b> server. To give someone access to just one server, use that server's <b>Network panel</b> instead. In Discord: User Settings → Advanced → Developer Mode ON, then right-click a person → <b>Copy User ID</b>. (/status is open to everyone.)</div>
+            <label class="form-label">Admins <span style="color:var(--text-dim); font-weight:400">(all servers)</span></label>
+            <div style="display:flex; gap:8px; align-items:center">
+              <input type="text" class="form-input" id="botAdminAddInput" placeholder="Paste a Discord user ID, press Enter" style="flex:1; pointer-events:all" onkeydown="if(event.key==='Enter'){event.preventDefault();addAdminUser();}">
+              <button class="btn-modal-cancel" style="pointer-events:all; white-space:nowrap" onclick="addAdminUser()">+ Add</button>
+            </div>
+            <div class="allow-chips" id="botAdminChips"></div>
+            <div class="form-hint">These users can run commands on <b>every</b> server. For access to just one server, use that server's <b>Network panel</b>. In Discord: User Settings → Advanced → Developer Mode ON, then right-click a person → <b>Copy User ID</b>. (/status is open to everyone.)</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
             <button class="btn-modal-cancel" style="pointer-events:all" onclick="saveDiscordBot()">💾 Save &amp; Connect</button>

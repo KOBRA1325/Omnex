@@ -127,6 +127,7 @@ contextBridge.exposeInMainWorld('nexus', {
   testDiscordWebhook: (url)      => ipcRenderer.invoke('test-discord-webhook', url),
   setServerWebhook:   (id, url)  => ipcRenderer.invoke('set-server-webhook', id, url),
   setServerAllowlist: (id, ids)  => ipcRenderer.invoke('set-server-allowlist', id, ids),
+  resolveDiscordUser: (id)       => ipcRenderer.invoke('resolve-discord-user', id),
   saveDiscordBot:     (cfg)      => ipcRenderer.invoke('save-discord-bot', cfg),
   getDiscordBotStatus:()         => ipcRenderer.invoke('get-discord-bot-status'),
   getDiscordBotInvite:()         => ipcRenderer.invoke('discord-bot-invite'),

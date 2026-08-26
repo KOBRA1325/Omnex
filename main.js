@@ -3328,6 +3328,38 @@ ipcMain.handle('discord-bot-invite', () => {
   return { ok: true, url: `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot%20applications.commands&permissions=2048&integration_type=0` };
 });
 
+// Simple authed GET against the Discord REST API (used to resolve user profiles).
+function discordApiGet(apiPath, token) {
+  return new Promise((resolve, reject) => {
+    const opts = { method: 'GET', hostname: 'discord.com', path: '/api/v10' + apiPath,
+      headers: { 'Authorization': 'Bot ' + token, 'User-Agent': 'Omnex/1.0' } };
+    const req = https.request(opts, res => {
+      let b = ''; res.on('data', c => b += c);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) { try { resolve(JSON.parse(b)); } catch (e) { reject(new Error('parse error')); } }
+        else reject(new Error('HTTP ' + res.statusCode));
+      });
+    });
+    req.on('error', reject); req.end();
+  });
+}
+
+// Resolve a Discord user ID to { username, avatarUrl } so the allowlist UI can show
+// a real profile chip instead of a bare ID. Needs the bot token to be set.
+ipcMain.handle('resolve-discord-user', async (e, userId) => {
+  const id = String(userId || '').trim();
+  if (!/^\d{5,20}$/.test(id)) return { ok: false, error: 'invalid-id', id };
+  const token = appSettings.discordBotToken;
+  if (!token) return { ok: false, error: 'no-token', id };
+  try {
+    const u = await discordApiGet(`/users/${id}`, token);
+    const avatarUrl = u.avatar
+      ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64`
+      : `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(u.id) >> 22n) % 6n)}.png`;
+    return { ok: true, id: u.id, username: u.global_name || u.username || id, avatarUrl };
+  } catch (err) { return { ok: false, error: err.message || 'lookup-failed', id }; }
+});
+
 
 // ── Server Templates ──────────────────────────────────────────────────────────
 const TEMPLATES_FILE = path.join(USER_DATA, 'templates.json');
