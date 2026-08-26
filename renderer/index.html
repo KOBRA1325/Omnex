@@ -612,7 +612,7 @@
 
 <!-- SETTINGS MODAL -->
 <div class="modal-overlay" id="settingsModal">
-  <div class="modal modal-wide">
+  <div class="modal modal-wide modal-settings">
     <div class="modal-title">⚙️ &nbsp;<span>Settings</span></div>
 
     <div class="settings-sections">
@@ -634,7 +634,7 @@
       </div>
 
       <div class="settings-section">
-        <div class="config-group-label">🔔 Notifications</div>
+        <div class="config-group-label">🔔 Desktop Notifications</div>
         <div class="settings-row">
           <div class="settings-row-info">
             <div class="settings-row-label">Enable Notifications</div>
@@ -702,7 +702,7 @@
         <div class="settings-row">
           <div class="settings-row-info">
             <div class="settings-row-label">Send events to Discord</div>
-            <div class="settings-row-desc">Post the enabled events above to a Discord channel via webhook</div>
+            <div class="settings-row-desc">Master switch — must be ON for anything below to post. (The 🔔 Test button works even while this is off.)</div>
           </div>
           <button class="cfg-bool-btn" id="setDiscordEnabled" onclick="toggleSetting('discordEnabled', this)">
             <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
@@ -829,7 +829,6 @@
           </button>
         </div>
       </div>
-    </div>
 
       <div class="settings-section">
         <div class="config-group-label">🔗 Connections</div>
@@ -904,6 +903,7 @@
           </div>
         </div>
       </div>
+    </div>
 
     <div class="modal-actions">
       <div style="font-size:10px; color:var(--text-dim); font-family:'Share Tech Mono',monospace" id="settingsVersion"></div>

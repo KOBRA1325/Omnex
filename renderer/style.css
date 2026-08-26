@@ -2446,6 +2446,34 @@ body.light-theme {
 .modal-wide  { width: min(560px, 94vw); }
 .modal-tall  { height: min(620px, calc(100vh - 48px)); display: flex; flex-direction: column; overflow: hidden; }
 .modal-tall > .modal-title { flex-shrink: 0; }
+
+/* Settings modal: fixed header + footer with a single scrolling body that always
+   fits the window and shrinks when Omnex is resized small (no nested scrollbars). */
+.modal-settings {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  overflow: hidden;             /* the body scrolls, not the whole modal */
+  padding: 0;                   /* header/body/footer own their padding */
+}
+.modal-settings > .modal-title {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-settings > .settings-sections {
+  flex: 1;
+  min-height: 0;
+  max-height: none;             /* fill available height instead of a fixed 60vh */
+  margin: 0;
+  padding: 18px 24px;
+}
+.modal-settings > .modal-actions {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 14px 24px;
+}
 .modal-title {
   font-family: 'Rajdhani', sans-serif;
   font-weight: 700;
