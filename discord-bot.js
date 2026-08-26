@@ -171,15 +171,16 @@ class DiscordBot {
     const editOriginal = (content) =>
       this._rest('PATCH', `/webhooks/${this.appId}/${d.token}/messages/@original`, { content }).catch(() => {});
 
-    // Mutating commands require the allowlist; read-only ones (/status) are open to
-    // any server member so people can check if it's up without being added in Omnex.
-    if (!PUBLIC_COMMANDS.has(name) && !this.deps.isAllowed(userId)) {
-      return respond('⛔ You are not on the allowlist for that command. (Anyone can use `/status`.)', true);
-    }
-
+    // Resolve which server this channel controls FIRST — permissions are per-server.
     const target = this.deps.resolveServer(channelId);
     if (target === 'ambiguous') return respond('⚠️ More than one server is linked to this channel. Give each server its own channel (set per-server webhooks in Omnex).', true);
     if (!target) return respond("⚠️ This channel isn't linked to a server yet. In Omnex, open that server → Network panel → set this channel's Discord webhook.", true);
+
+    // Mutating commands require access to THIS server (its allowlist or the global
+    // admins); read-only /status is open to any server member.
+    if (!PUBLIC_COMMANDS.has(name) && !this.deps.isAllowed(userId, target.id)) {
+      return respond('⛔ You don\'t have access to commands for this server. (Anyone can use `/status`.)', true);
+    }
 
     // Actions take time (start/stop/backup) — defer, then edit the reply with the outcome.
     await this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 5 }).catch(() => {});

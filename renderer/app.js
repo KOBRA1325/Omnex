@@ -2012,6 +2012,11 @@ async function renderNetworkCard() {
           <button class="btn-copy" style="pointer-events:all; padding:4px 8px" title="Send a test message to this channel" onclick="testServerWebhook(this)">🔔</button>
         </div>
         <div class="network-hint" style="margin-top:2px">Route <b>${escapeHtml(s.name)}</b>'s feed to its own channel. Leave blank to use the global webhook from Settings → Discord.</div>
+        <div class="network-label" style="display:flex; align-items:center; gap:6px; margin-top:10px">🔑 Command access <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
+        <input type="text" id="svAllowInput" class="form-input" placeholder="Discord user IDs, comma-separated"
+          value="${escapeHtml(s.discordAllowedUsers||'')}" style="pointer-events:all; font-size:11px"
+          onchange="saveServerAllowlist(this.value)">
+        <div class="network-hint" style="margin-top:2px">These users may run <b>${escapeHtml(s.name)}</b>'s commands (/start /stop /restart /backup). Admins in Settings → Discord can control every server. /status is open to anyone.</div>
       </div>`;
   } catch(e) { body.innerHTML='<div class="empty-msg-sm">Could not fetch network info.</div>'; }
 }
@@ -2021,6 +2026,13 @@ async function saveServerWebhook(value) {
   s.discordWebhookUrl = url; // keep the in-memory copy in sync so routing is immediate
   try { await window.nexus.setServerWebhook(s.id, url); } catch(e) {}
   showToast('💬', url ? 'This server will post to its own channel' : 'Cleared — this server uses the global webhook');
+}
+async function saveServerAllowlist(value) {
+  const s = getActive(); if (!s) return;
+  const ids = (value || '').trim();
+  s.discordAllowedUsers = ids; // keep in-memory copy in sync
+  try { await window.nexus.setServerAllowlist(s.id, ids); } catch(e) {}
+  showToast('🔑', ids ? 'Command access updated for this server' : 'Cleared — only global admins can control this server');
 }
 async function testServerWebhook(btn) {
   const url = (document.getElementById('svWebhookInput')?.value || '').trim();

@@ -759,9 +759,9 @@
             <input type="password" class="form-input" id="setDiscordBotToken" placeholder="Paste your bot token" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
           </div>
           <div>
-            <label class="form-label">Allowed Discord User IDs <span style="color:var(--text-dim); font-weight:400">(comma-separated)</span></label>
+            <label class="form-label">Admin User IDs <span style="color:var(--text-dim); font-weight:400">(all servers, comma-separated)</span></label>
             <input type="text" class="form-input" id="setDiscordBotAllowed" placeholder="e.g. 123456789012345678, 987654321098765432" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
-            <div class="form-hint">In Discord: User Settings → Advanced → Developer Mode ON, then right-click a person → <b>Copy User ID</b>. Empty = nobody can run commands.</div>
+            <div class="form-hint">These users can run commands on <b>every</b> server. To give someone access to just one server, use that server's <b>Network panel</b> instead. In Discord: User Settings → Advanced → Developer Mode ON, then right-click a person → <b>Copy User ID</b>. (/status is open to everyone.)</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
             <button class="btn-modal-cancel" style="pointer-events:all" onclick="saveDiscordBot()">💾 Save &amp; Connect</button>

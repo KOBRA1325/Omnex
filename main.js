@@ -3022,6 +3022,15 @@ ipcMain.handle('set-server-webhook', (e, serverId, url) => {
   return { ok: true };
 });
 
+// Per-server Discord command allowlist (user IDs allowed to control just this server).
+ipcMain.handle('set-server-allowlist', (e, serverId, ids) => {
+  const s = appData.servers.find(sv => sv.id === serverId);
+  if (!s) return { ok: false, error: 'Server not found' };
+  s.discordAllowedUsers = (ids || '').trim();
+  saveData();
+  return { ok: true };
+});
+
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 function sendNotification(title, body, urgency = 'normal') {
@@ -3212,6 +3221,17 @@ function resolveServerByChannel(channelId) {
 function discordAllowedSet() {
   return new Set(String(appSettings.discordBotAllowedUsers || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean));
 }
+// Who may run mutating commands on a given server: the global admins (all servers)
+// PLUS that server's own per-server allowlist. Leave the global list empty to scope
+// access strictly per-server.
+function discordAllowedFor(serverId) {
+  const allowed = discordAllowedSet(); // global admins
+  const s = appData.servers.find(x => x.id === serverId);
+  if (s && s.discordAllowedUsers) {
+    String(s.discordAllowedUsers).split(/[\s,]+/).map(x => x.trim()).filter(Boolean).forEach(id => allowed.add(id));
+  }
+  return allowed;
+}
 
 // Human-readable duration for the Discord /status reply (e.g. "2d 4h", "3h 12m", "8m").
 function fmtDurationShort(ms) {
@@ -3271,7 +3291,7 @@ function getDiscordBot() {
     _discordBot = new DiscordBot({
       log: (msg, level) => { try { console.log('[discord-bot]', msg); } catch (e) {} emit('discord-bot-log', { msg, level: level || 'dim' }); },
       onStatus: (status, info) => { _discordBotStatus = { status, info }; emit('discord-bot-status', { status, info }); },
-      isAllowed: (userId) => discordAllowedSet().has(String(userId)),
+      isAllowed: (userId, serverId) => discordAllowedFor(serverId).has(String(userId)),
       resolveServer: (channelId) => resolveServerByChannel(channelId),
       runAction: (serverId, action, userName) => discordRunAction(serverId, action, userName),
     });
