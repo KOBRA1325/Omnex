@@ -24,6 +24,8 @@ const COMMANDS = [
   { name: 'backup',  description: "Back up this channel's server", type: 1 },
   { name: 'status',  description: "Show this channel's server status", type: 1 },
 ];
+// Read-only commands anyone in the server may run — no allowlist needed.
+const PUBLIC_COMMANDS = new Set(['status']);
 
 class DiscordBot {
   // deps: { log(msg, level), onStatus(status, info),
@@ -169,7 +171,11 @@ class DiscordBot {
     const editOriginal = (content) =>
       this._rest('PATCH', `/webhooks/${this.appId}/${d.token}/messages/@original`, { content }).catch(() => {});
 
-    if (!this.deps.isAllowed(userId)) return respond('⛔ You are not on the allowlist for server commands.', true);
+    // Mutating commands require the allowlist; read-only ones (/status) are open to
+    // any server member so people can check if it's up without being added in Omnex.
+    if (!PUBLIC_COMMANDS.has(name) && !this.deps.isAllowed(userId)) {
+      return respond('⛔ You are not on the allowlist for that command. (Anyone can use `/status`.)', true);
+    }
 
     const target = this.deps.resolveServer(channelId);
     if (target === 'ambiguous') return respond('⚠️ More than one server is linked to this channel. Give each server its own channel (set per-server webhooks in Omnex).', true);

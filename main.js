@@ -3213,18 +3213,31 @@ function discordAllowedSet() {
   return new Set(String(appSettings.discordBotAllowedUsers || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean));
 }
 
+// Human-readable duration for the Discord /status reply (e.g. "2d 4h", "3h 12m", "8m").
+function fmtDurationShort(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${sec}s`;
+}
+
 // Perform a command coming from Discord. Reuses the same actions as the UI.
 async function discordRunAction(serverId, action, userName) {
   const s = appData.servers.find(x => x.id === serverId);
   if (!s) return { ok: false, message: '❌ Server not found.' };
   const nm = s.name;
   const isOnline = () => !!serverProcesses[serverId];
-  logEvent(serverId, 'DISCORD_CMD', `${userName || 'someone'} ran /${action} from Discord`);
+  // Log the mutating commands for the audit trail; /status is public + high-frequency.
+  if (action !== 'status') logEvent(serverId, 'DISCORD_CMD', `${userName || 'someone'} ran /${action} from Discord`);
   try {
     if (action === 'status') {
       const on = isOnline();
+      if (!on) return { ok: true, message: `📊 **${nm}** — ⚪ Offline` };
       const players = (s.players && s.players.length) || 0;
-      return { ok: true, message: `📊 **${nm}** — ${on ? '🟢 online' : '⚪ offline'}${on ? ` · ${players} player(s)` : ''}` };
+      const uptime = s.startedAt ? fmtDurationShort(Date.now() - s.startedAt) : 'unknown';
+      return { ok: true, message: `📊 **${nm}** — 🟢 Online\n⏱ Uptime: **${uptime}**\n👥 Players: **${players}**` };
     }
     if (action === 'start') {
       if (isOnline()) return { ok: true, message: `▶ **${nm}** is already running.` };
