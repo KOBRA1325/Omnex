@@ -126,6 +126,10 @@ contextBridge.exposeInMainWorld('nexus', {
   onSettingsChanged:  (cb)       => ipcRenderer.on('settings-changed', (_, d) => cb(d)),
   testDiscordWebhook: (url)      => ipcRenderer.invoke('test-discord-webhook', url),
   setServerWebhook:   (id, url)  => ipcRenderer.invoke('set-server-webhook', id, url),
+  saveDiscordBot:     (cfg)      => ipcRenderer.invoke('save-discord-bot', cfg),
+  getDiscordBotStatus:()         => ipcRenderer.invoke('get-discord-bot-status'),
+  getDiscordBotInvite:()         => ipcRenderer.invoke('discord-bot-invite'),
+  onDiscordBotStatus: (cb)       => ipcRenderer.on('discord-bot-status', (_, d) => cb(d)),
 
   // Log browser
   getLogFiles:       (id)       => ipcRenderer.invoke('get-log-files', id),

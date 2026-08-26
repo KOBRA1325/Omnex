@@ -1,6 +1,6 @@
 {
   "name": "omnex",
-  "version": "0.5.45",
+  "version": "0.5.46",
   "description": "Omnex - Game Server Manager",
   "main": "main.js",
   "author": {
@@ -25,7 +25,8 @@
     "electron-updater": "^6.8.9",
     "steam-session": "^1.9.2",
     "steam-totp": "^2.1.2",
-    "systeminformation": "^5.22.0"
+    "systeminformation": "^5.22.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "electron": "^29.0.0",
@@ -50,6 +51,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "discord-bot.js",
       "steam-auth.js",
       "renderer/**/*",
       "assets/**/*",

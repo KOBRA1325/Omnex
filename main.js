@@ -430,6 +430,8 @@ if (gotSingleInstanceLock) app.whenReady().then(async () => {
   initAutoUpdater();
   runStartupUpdateCheck();
   logSystemJavaInfo();
+  // Connect the Discord control bot if configured (deny-by-default allowlist).
+  try { startDiscordBot(); } catch(e) {}
 });
 
 app.on('before-quit', () => {
@@ -2965,6 +2967,9 @@ function loadSettings() {
     discordWebhookUrl:   '',
     discordChat:         true,  // forward in-game chat to Discord
     discordDeaths:       true,  // forward deaths & advancements to Discord
+    discordBotEnabled:   false, // two-way control: allow-listed users run /start etc. from Discord
+    discordBotToken:     '',    // Discord bot token (secret; stays local)
+    discordBotAllowedUsers: '', // comma/space-separated Discord user IDs allowed to run commands
     maxConsoleLines:     500,
     defaultBackupKeep:   10,
     autoStartServers:    [],
@@ -2989,9 +2994,15 @@ let appSettings = loadSettings();
 
 ipcMain.handle('get-settings', () => appSettings);
 ipcMain.handle('save-settings', (e, settings) => {
+  const prevWebhook = appSettings.discordWebhookUrl;
   appSettings = { ...appSettings, ...settings };
   saveSettings(appSettings);
   applySettings();
+  // The global webhook is the channel fallback for servers without an override —
+  // if it changed, re-link the bot's channel map.
+  if (settings && 'discordWebhookUrl' in settings && settings.discordWebhookUrl !== prevWebhook) {
+    refreshDiscordChannelMap().catch(() => {});
+  }
   return { ok: true };
 });
 
@@ -3007,6 +3018,7 @@ ipcMain.handle('set-server-webhook', (e, serverId, url) => {
   if (!s) return { ok: false, error: 'Server not found' };
   s.discordWebhookUrl = (url || '').trim();
   saveData();
+  refreshDiscordChannelMap().catch(() => {}); // re-link channels for the bot
   return { ok: true };
 });
 
@@ -3151,6 +3163,133 @@ ipcMain.handle('test-discord-webhook', async (e, url) => {
     description: 'This is a test message. Your Discord webhook is working — Omnex will post server events here.',
     color: NOTIFY_COLORS.start,
   });
+});
+
+// ── Discord bot: two-way control (/start /stop /restart /backup /status) ──────
+// A gateway bot lets allow-listed users run server commands from a channel. Which
+// server a command targets is resolved BY CHANNEL: each server is linked to the
+// channel of its (per-server or global) webhook, so `/start` in #minecraft controls
+// the Minecraft server. Deny-by-default: only the listed Discord user IDs may run
+// anything.
+const { DiscordBot } = require('./discord-bot');
+let _discordBot = null;
+let _discordBotStatus = { status: 'offline', info: null };
+let _discordChannelMap = {}; // channelId -> [serverId, ...]
+
+// GET a webhook (no auth needed — token is in the URL) to learn its channel_id.
+function resolveWebhookChannelId(url) {
+  return new Promise(resolve => {
+    if (!url || !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//i.test(url.trim())) return resolve(null);
+    let u; try { u = new URL(url.trim()); } catch (e) { return resolve(null); }
+    https.get({ hostname: u.hostname, path: u.pathname + u.search, headers: { 'User-Agent': 'Omnex/1.0' } }, res => {
+      let b = ''; res.on('data', c => b += c);
+      res.on('end', () => { try { resolve(JSON.parse(b).channel_id || null); } catch (e) { resolve(null); } });
+    }).on('error', () => resolve(null));
+  });
+}
+
+// Rebuild channelId -> server(s) from each server's effective webhook channel.
+async function refreshDiscordChannelMap() {
+  const map = {};
+  for (const s of appData.servers) {
+    const url = serverDiscordWebhook(s.id);
+    if (!url) { s.discordChannelId = null; continue; }
+    const chan = await resolveWebhookChannelId(url);
+    s.discordChannelId = chan || null;
+    if (chan) (map[chan] = map[chan] || []).push(s.id);
+  }
+  _discordChannelMap = map;
+}
+
+function resolveServerByChannel(channelId) {
+  const ids = _discordChannelMap[channelId] || [];
+  if (ids.length === 0) return null;
+  if (ids.length > 1) return 'ambiguous';
+  const s = appData.servers.find(x => x.id === ids[0]);
+  return s ? { id: s.id, name: s.name } : null;
+}
+
+function discordAllowedSet() {
+  return new Set(String(appSettings.discordBotAllowedUsers || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean));
+}
+
+// Perform a command coming from Discord. Reuses the same actions as the UI.
+async function discordRunAction(serverId, action, userName) {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s) return { ok: false, message: '❌ Server not found.' };
+  const nm = s.name;
+  const isOnline = () => !!serverProcesses[serverId];
+  logEvent(serverId, 'DISCORD_CMD', `${userName || 'someone'} ran /${action} from Discord`);
+  try {
+    if (action === 'status') {
+      const on = isOnline();
+      const players = (s.players && s.players.length) || 0;
+      return { ok: true, message: `📊 **${nm}** — ${on ? '🟢 online' : '⚪ offline'}${on ? ` · ${players} player(s)` : ''}` };
+    }
+    if (action === 'start') {
+      if (isOnline()) return { ok: true, message: `▶ **${nm}** is already running.` };
+      if (!s.execPath) return { ok: false, message: `❌ **${nm}** isn't installed yet.` };
+      startServerById(serverId).catch(() => {});
+      return { ok: true, message: `✅ Starting **${nm}**…` };
+    }
+    if (action === 'stop') {
+      if (!isOnline()) return { ok: true, message: `⏹ **${nm}** is already stopped.` };
+      await killServer(serverId);
+      return { ok: true, message: `✅ **${nm}** has been stopped.` };
+    }
+    if (action === 'restart') {
+      if (!s.execPath) return { ok: false, message: `❌ **${nm}** isn't installed yet.` };
+      if (isOnline()) { await killServer(serverId); await new Promise(r => setTimeout(r, 2500)); }
+      startServerById(serverId).catch(() => {});
+      return { ok: true, message: `🔄 Restarting **${nm}**…` };
+    }
+    if (action === 'backup') {
+      await createBackup(serverId, 'Discord backup', 'discord');
+      return { ok: true, message: `💾 Backup complete for **${nm}**.` };
+    }
+    return { ok: false, message: '❓ Unknown command.' };
+  } catch (e) {
+    return { ok: false, message: `❌ /${action} failed: ${e.message || e}` };
+  }
+}
+
+function getDiscordBot() {
+  if (!_discordBot) {
+    _discordBot = new DiscordBot({
+      log: (msg, level) => { try { console.log('[discord-bot]', msg); } catch (e) {} emit('discord-bot-log', { msg, level: level || 'dim' }); },
+      onStatus: (status, info) => { _discordBotStatus = { status, info }; emit('discord-bot-status', { status, info }); },
+      isAllowed: (userId) => discordAllowedSet().has(String(userId)),
+      resolveServer: (channelId) => resolveServerByChannel(channelId),
+      runAction: (serverId, action, userName) => discordRunAction(serverId, action, userName),
+    });
+  }
+  return _discordBot;
+}
+
+async function startDiscordBot() {
+  const bot = getDiscordBot();
+  if (!appSettings.discordBotEnabled || !appSettings.discordBotToken) { bot.stop(); return; }
+  await refreshDiscordChannelMap();
+  bot.start(appSettings.discordBotToken);
+}
+
+ipcMain.handle('get-discord-bot-status', () => _discordBotStatus);
+ipcMain.handle('save-discord-bot', async (e, cfg) => {
+  appSettings.discordBotEnabled = !!(cfg && cfg.enabled);
+  if (cfg && typeof cfg.token === 'string') appSettings.discordBotToken = cfg.token.trim();
+  if (cfg && typeof cfg.allowed === 'string') appSettings.discordBotAllowedUsers = cfg.allowed.trim();
+  saveSettings(appSettings);
+  await startDiscordBot();
+  return { ok: true };
+});
+// Build the OAuth invite URL. The application id is the bot user's id, which is the
+// base64-decoded first segment of the token (or the id we learned after connecting).
+ipcMain.handle('discord-bot-invite', () => {
+  const token = appSettings.discordBotToken || '';
+  let appId = getDiscordBot().appId;
+  if (!appId && token.includes('.')) { try { appId = Buffer.from(token.split('.')[0], 'base64').toString('utf8'); } catch (e) {} }
+  if (!appId || !/^\d{5,}$/.test(appId)) return { ok: false, error: 'Enter a valid bot token first.' };
+  return { ok: true, url: `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot%20applications.commands&permissions=2048` };
 });
 
 

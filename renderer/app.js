@@ -2343,13 +2343,16 @@ function closeSettingsModal() {
 }
 function applySettingsToUI() {
   if (!appSettings) return;
-  ['notifications','notifyOnCrash','notifyOnStart','notifyOnStop','notifyOnBackup','notifyOnPlayerJoin','discordEnabled','discordChat','discordDeaths','startMinimized','minimizeToTray'].forEach(key => {
+  ['notifications','notifyOnCrash','notifyOnStart','notifyOnStop','notifyOnBackup','notifyOnPlayerJoin','discordEnabled','discordChat','discordDeaths','discordBotEnabled','startMinimized','minimizeToTray'].forEach(key => {
     const el=document.getElementById(`set${key[0].toUpperCase()+key.slice(1)}`); if(!el) return;
     const val=appSettings[key]||false; el.classList.toggle('on',val);
     const v=el.querySelector('.cfg-bool-val'); if(v) v.textContent=val?'ON':'OFF';
   });
   const webhookEl=document.getElementById('setDiscordWebhookUrl');
   if(webhookEl) webhookEl.value=appSettings.discordWebhookUrl||'';
+  const botTok=document.getElementById('setDiscordBotToken'); if(botTok) botTok.value=appSettings.discordBotToken||'';
+  const botAllow=document.getElementById('setDiscordBotAllowed'); if(botAllow) botAllow.value=appSettings.discordBotAllowedUsers||'';
+  try { window.nexus.getDiscordBotStatus().then(renderBotStatus).catch(()=>{}); } catch(e) {}
   const sels={setMaxConsoleLines:'maxConsoleLines',setConsoleFontSize:'consoleFontSize',setDefaultBackupKeep:'defaultBackupKeep',setAppTextScale:'appTextScale'};
   Object.entries(sels).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&appSettings[key]!==undefined)el.value=String(appSettings[key]);});
   // Apply the app text scale on load
@@ -2392,6 +2395,47 @@ async function testDiscordWebhook(btn) {
   } catch(e) {
     if(result){result.style.display='block';result.style.color='var(--danger, #ED4245)';result.textContent='❌ '+e.message;}
   } finally { if(btn){btn.disabled=false;btn.textContent=oldText;} }
+}
+
+// ── Discord bot (two-way control) ─────────────────────────────────────────────
+async function saveDiscordBot() {
+  const cfg = {
+    enabled: !!appSettings.discordBotEnabled,
+    token:   (document.getElementById('setDiscordBotToken')?.value || '').trim(),
+    allowed: (document.getElementById('setDiscordBotAllowed')?.value || '').trim(),
+  };
+  appSettings.discordBotToken = cfg.token;
+  appSettings.discordBotAllowedUsers = cfg.allowed;
+  try { await window.nexus.saveDiscordBot(cfg); showToast('🤖', cfg.enabled ? 'Bot settings saved — connecting…' : 'Bot settings saved'); }
+  catch(e) { showToast('❌', e.message || 'Failed to save'); }
+}
+async function toggleBotEnabled(btn) {
+  appSettings.discordBotEnabled = !appSettings.discordBotEnabled;
+  btn.classList.toggle('on', appSettings.discordBotEnabled);
+  const v = btn.querySelector('.cfg-bool-val'); if (v) v.textContent = appSettings.discordBotEnabled ? 'ON' : 'OFF';
+  await saveDiscordBot();
+}
+async function copyBotInvite() {
+  await saveDiscordBot(); // ensure the token is current before deriving the app id
+  const box = document.getElementById('botInviteResult');
+  try {
+    const r = await window.nexus.getDiscordBotInvite();
+    if (box) box.style.display = 'block';
+    if (r.ok) { if (box) { box.style.color = 'var(--text-dim)'; box.innerHTML = `<a href="${r.url}" target="_blank" style="color:var(--accent); word-break:break-all">${r.url}</a><br>Open this link, pick your server, and authorize. (Copied to clipboard.)`; } copyToClipboard(r.url); }
+    else if (box) { box.style.color = 'var(--red, #e05a5a)'; box.textContent = r.error || 'Could not build an invite link.'; }
+  } catch(e) { if (box) { box.style.display='block'; box.textContent = '❌ ' + e.message; } }
+}
+function renderBotStatus(d) {
+  const el = document.getElementById('botStatusText'); if (!el) return;
+  const map = {
+    offline:      ['#5a6a80', 'Offline'],
+    connecting:   ['#e8b84b', 'Connecting…'],
+    reconnecting: ['#e8b84b', 'Reconnecting…'],
+    online:       ['#3ecf5b', 'Online' + (d && d.info && d.info.user ? ` as ${d.info.user}` : '')],
+    error:        ['#e05a5a', 'Error — check the token'],
+  };
+  const [color, label] = map[d && d.status] || map.offline;
+  el.innerHTML = `<span style="color:${color}">● ${label}</span>`;
 }
 
 // ── Remote Access ─────────────────────────────────────────────────────────────
@@ -2679,6 +2723,7 @@ function wireEvents(){
   ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
   window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId) appendActivity(entry); });
+  try { window.nexus.onDiscordBotStatus(renderBotStatus); } catch(e) {}
   window.nexus.onEventLogged(({serverId})=>{const m=document.getElementById('eventLogModal');if(serverId===activeId && m && m.classList.contains('open')) renderEventLog();});
   window.nexus.onServerStatus(({serverId,status,startedAt})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status=status;s.startedAt=(status==='online')?(startedAt||s.startedAt||Date.now()):null;}if(serverId===activeId){renderHeader();if(status==='online'){startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status='offline';s.startedAt=null;}if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});

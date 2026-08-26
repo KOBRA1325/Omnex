@@ -741,6 +741,35 @@
             <span class="cfg-bool-val">OFF</span>
           </button>
         </div>
+
+        <div class="settings-row" style="flex-direction:column; align-items:stretch; gap:10px; border-top:1px solid var(--border); margin-top:4px; padding-top:14px">
+          <div class="settings-row-info">
+            <div class="settings-row-label">🤖 Bot control <span style="color:var(--text-dim); font-weight:400; font-size:10px">(run /start /stop /restart /backup /status from Discord)</span></div>
+            <div class="settings-row-desc">Needs a Discord <b>bot</b> (not just a webhook). Create one at discord.com/developers → New Application → Bot → Reset &amp; Copy Token. A command targets the server linked to the channel it's run in (via that server's webhook). Only the user IDs listed below may run commands.</div>
+          </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px">
+            <div style="font-size:12px; color:var(--text-bright); font-family:'Rajdhani',sans-serif; font-weight:600">Enable bot control</div>
+            <button class="cfg-bool-btn" id="setDiscordBotEnabled" onclick="toggleBotEnabled(this)">
+              <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+              <span class="cfg-bool-val">OFF</span>
+            </button>
+          </div>
+          <div>
+            <label class="form-label">Bot Token</label>
+            <input type="password" class="form-input" id="setDiscordBotToken" placeholder="Paste your bot token" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
+          </div>
+          <div>
+            <label class="form-label">Allowed Discord User IDs <span style="color:var(--text-dim); font-weight:400">(comma-separated)</span></label>
+            <input type="text" class="form-input" id="setDiscordBotAllowed" placeholder="e.g. 123456789012345678, 987654321098765432" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
+            <div class="form-hint">In Discord: User Settings → Advanced → Developer Mode ON, then right-click a person → <b>Copy User ID</b>. Empty = nobody can run commands.</div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+            <button class="btn-modal-cancel" style="pointer-events:all" onclick="saveDiscordBot()">💾 Save &amp; Connect</button>
+            <button class="btn-modal-cancel" style="pointer-events:all" onclick="copyBotInvite(this)">🔗 Invite Link</button>
+            <span id="botStatusText" style="font-size:11px; font-family:'Share Tech Mono',monospace"><span style="color:#5a6a80">● Offline</span></span>
+          </div>
+          <div id="botInviteResult" class="form-hint" style="display:none"></div>
+        </div>
       </div>
 
       <div class="settings-section">
