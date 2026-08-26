@@ -152,7 +152,8 @@ class DiscordBot {
     this.registered.add(guildId);
     try {
       await this._rest('PUT', `/applications/${this.appId}/guilds/${guildId}/commands`, COMMANDS);
-    } catch (e) { this.registered.delete(guildId); this.deps.log('Slash-command register failed: ' + e.message, 'dim'); }
+      this.deps.log(`Registered ${COMMANDS.length} commands in a server.`, 'success');
+    } catch (e) { this.registered.delete(guildId); this.deps.log('Slash-command register failed: ' + e.message, 'error'); }
   }
 
   async _onInteraction(d) {

@@ -2724,6 +2724,12 @@ function wireEvents(){
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
   window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId) appendActivity(entry); });
   try { window.nexus.onDiscordBotStatus(renderBotStatus); } catch(e) {}
+  try { window.nexus.onDiscordBotLog(({msg, level}) => {
+    const el = document.getElementById('botLogLine'); if (!el) return;
+    el.style.display = 'block';
+    el.style.color = level === 'error' ? 'var(--red, #e05a5a)' : level === 'success' ? 'var(--green, #3ecf5b)' : 'var(--text-dim)';
+    el.textContent = '› ' + msg;
+  }); } catch(e) {}
   window.nexus.onEventLogged(({serverId})=>{const m=document.getElementById('eventLogModal');if(serverId===activeId && m && m.classList.contains('open')) renderEventLog();});
   window.nexus.onServerStatus(({serverId,status,startedAt})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status=status;s.startedAt=(status==='online')?(startedAt||s.startedAt||Date.now()):null;}if(serverId===activeId){renderHeader();if(status==='online'){startStatsPolling();startUptimeCounter();}}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){}});
   window.nexus.onServerStopped(({serverId})=>{const s=servers.find(sv=>sv.id===serverId);if(s){s.status='offline';s.startedAt=null;}if(serverId===activeId){renderHeader();clearInterval(statsInterval);clearInterval(uptimeInterval);uptimeSec=0;renderStats(null);appendLog('warn','Server stopped.');}renderSidebar();if(currentView==='dashboard')renderDashboard();try{window.nexus.trayRebuild();}catch(e){};});

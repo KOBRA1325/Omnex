@@ -130,6 +130,7 @@ contextBridge.exposeInMainWorld('nexus', {
   getDiscordBotStatus:()         => ipcRenderer.invoke('get-discord-bot-status'),
   getDiscordBotInvite:()         => ipcRenderer.invoke('discord-bot-invite'),
   onDiscordBotStatus: (cb)       => ipcRenderer.on('discord-bot-status', (_, d) => cb(d)),
+  onDiscordBotLog:    (cb)       => ipcRenderer.on('discord-bot-log', (_, d) => cb(d)),
 
   // Log browser
   getLogFiles:       (id)       => ipcRenderer.invoke('get-log-files', id),

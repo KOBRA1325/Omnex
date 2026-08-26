@@ -3289,7 +3289,10 @@ ipcMain.handle('discord-bot-invite', () => {
   let appId = getDiscordBot().appId;
   if (!appId && token.includes('.')) { try { appId = Buffer.from(token.split('.')[0], 'base64').toString('utf8'); } catch (e) {} }
   if (!appId || !/^\d{5,}$/.test(appId)) return { ok: false, error: 'Enter a valid bot token first.' };
-  return { ok: true, url: `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot%20applications.commands&permissions=2048` };
+  // integration_type=0 forces a GUILD (server) install so the actual bot member is
+  // added — without it, Discord may "user install" only the commands (no bot in the
+  // server), and then commands never register because the bot can't see the guild.
+  return { ok: true, url: `https://discord.com/oauth2/authorize?client_id=${appId}&scope=bot%20applications.commands&permissions=2048&integration_type=0` };
 });
 
 
