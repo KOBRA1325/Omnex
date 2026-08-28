@@ -17,15 +17,41 @@ const API = 'https://discord.com/api/v10';
 const GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const FATAL_CLOSE = new Set([4004, 4010, 4011, 4012, 4013, 4014]); // bad token / bad intents / etc.
 
+// Option types: 1=SUB_COMMAND 3=STRING 6=USER 7=CHANNEL
 const COMMANDS = [
+  { name: 'status',  description: "Show this channel's server status", type: 1 },
   { name: 'start',   description: "Start this channel's server",   type: 1 },
   { name: 'stop',    description: "Stop this channel's server",    type: 1 },
   { name: 'restart', description: "Restart this channel's server", type: 1 },
   { name: 'backup',  description: "Back up this channel's server", type: 1 },
-  { name: 'status',  description: "Show this channel's server status", type: 1 },
+  { name: 'map',     description: "Show this channel's server map link", type: 1 },
+  { name: 'commands', description: 'List every Omnex bot command', type: 1 },
+  { name: 'serverid', description: '(admin) Show a server\'s ID', type: 1, options: [
+      { name: 'server', description: 'Server name', type: 3, required: true, autocomplete: true } ] },
+  { name: 'link', description: '(admin) Link this channel to a server', type: 1, options: [
+      { name: 'server',   description: 'Pick a server by name', type: 3, required: false, autocomplete: true },
+      { name: 'serverid', description: 'Or a server ID', type: 3, required: false },
+      { name: 'channel',  description: 'Channel to link (default: here)', type: 7, required: false } ] },
+  { name: 'account', description: '(admin) Manage who can run commands', type: 1, options: [
+      { name: 'add', description: 'Grant command access', type: 1, options: [
+          { name: 'user',  description: 'Pick a user', type: 6, required: false },
+          { name: 'id',    description: 'Or a user ID', type: 3, required: false },
+          { name: 'scope', description: 'Where (default: this server)', type: 3, required: false, choices: [
+              { name: 'This server', value: 'server' }, { name: 'Admin (all servers)', value: 'admin' } ] } ] },
+      { name: 'remove', description: 'Revoke command access', type: 1, options: [
+          { name: 'user',  description: 'Pick a user', type: 6, required: false },
+          { name: 'id',    description: 'Or a user ID', type: 3, required: false },
+          { name: 'scope', description: 'Where (default: this server)', type: 3, required: false, choices: [
+              { name: 'This server', value: 'server' }, { name: 'Admin (all servers)', value: 'admin' } ] } ] } ] },
+  { name: 'create', description: '(admin) Create & install a new server', type: 1, options: [
+      { name: 'game',     description: 'Game', type: 3, required: true, autocomplete: true },
+      { name: 'name',     description: 'Server name', type: 3, required: true },
+      { name: 'password', description: 'Server password (optional)', type: 3, required: false } ] },
 ];
 // Read-only commands anyone in the server may run — no allowlist needed.
-const PUBLIC_COMMANDS = new Set(['status']);
+const PUBLIC_COMMANDS = new Set(['status', 'map', 'commands']);
+// Admin-only commands (global admin list required).
+const ADMIN_COMMANDS = new Set(['serverid', 'link', 'account', 'create']);
 
 class DiscordBot {
   // deps: { log(msg, level), onStatus(status, info),
@@ -158,37 +184,132 @@ class DiscordBot {
     } catch (e) { this.registered.delete(guildId); this.deps.log('Slash-command register failed: ' + e.message, 'error'); }
   }
 
+  // Read a top-level option value by name.
+  _opt(d, name) { const o = (d.data.options || []).find(x => x.name === name); return o ? o.value : undefined; }
+  // Find the option the user is currently typing (for autocomplete), incl. subcommands.
+  _findFocused(options) {
+    for (const o of options || []) {
+      if (o.focused) return o;
+      if (o.options) { const f = this._findFocused(o.options); if (f) return f; }
+    }
+    return null;
+  }
+  _helpText() {
+    return [
+      '**Omnex bot commands**',
+      '',
+      '__Anyone__',
+      '• `/status` — is the server up? uptime + players',
+      '• `/map` — the server\'s live map link (Minecraft)',
+      '• `/commands` — this list',
+      '',
+      '__Allow-listed for the server__',
+      '• `/start` · `/stop` · `/restart` · `/backup`',
+      '',
+      '__Admins only__',
+      '• `/link server:<name>` — link this channel to a server',
+      '• `/account add|remove user:@who [scope]` — grant/revoke access',
+      '• `/serverid server:<name>` — show a server\'s ID',
+      '• `/create game:<game> name:<name> [password]` — make a new server',
+    ].join('\n');
+  }
+
+  async _onAutocomplete(d) {
+    const focused = this._findFocused(d.data.options);
+    let choices = [];
+    try {
+      if (focused && focused.name === 'server') {
+        const q = String(focused.value || '').toLowerCase();
+        choices = (await this.deps.listServers())
+          .filter(s => s.name.toLowerCase().includes(q))
+          .slice(0, 25).map(s => ({ name: `${s.name} (${s.game})`.slice(0, 100), value: s.id }));
+      } else if (focused && focused.name === 'game') {
+        const q = String(focused.value || '').toLowerCase();
+        choices = (await this.deps.listCreatableGames())
+          .filter(g => g.toLowerCase().includes(q)).slice(0, 25).map(g => ({ name: g, value: g }));
+      }
+    } catch (e) {}
+    return this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 8, data: { choices } }).catch(() => {});
+  }
+
   async _onInteraction(d) {
+    if (d.type === 4) return this._onAutocomplete(d);
     if (d.type !== 2) return; // APPLICATION_COMMAND only
+
     const name = d.data && d.data.name;
     const user = (d.member && d.member.user) || d.user || {};
     const userId = user.id;
     const userName = (d.member && d.member.nick) || user.global_name || user.username || 'someone';
     const channelId = d.channel_id;
+    const D = this.deps;
 
-    const respond = (content, ephemeral) =>
+    const reply = (content, ephemeral = true) =>
       this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 4, data: { content, flags: ephemeral ? 64 : 0 } }).catch(() => {});
-    const editOriginal = (content) =>
+    const defer = (ephemeral = true) =>
+      this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 5, data: { flags: ephemeral ? 64 : 0 } }).catch(() => {});
+    const edit = (content) =>
       this._rest('PATCH', `/webhooks/${this.appId}/${d.token}/messages/@original`, { content }).catch(() => {});
 
-    // Resolve which server this channel controls FIRST — permissions are per-server.
-    const target = this.deps.resolveServer(channelId);
-    if (target === 'ambiguous') return respond('⚠️ More than one server is linked to this channel. Give each server its own channel (set per-server webhooks in Omnex).', true);
-    if (!target) return respond("⚠️ This channel isn't linked to a server yet. In Omnex, open that server → Network panel → set this channel's Discord webhook.", true);
-
-    // Mutating commands require access to THIS server (its allowlist or the global
-    // admins); read-only /status is open to any server member.
-    if (!PUBLIC_COMMANDS.has(name) && !this.deps.isAllowed(userId, target.id)) {
-      return respond('⛔ You don\'t have access to commands for this server. (Anyone can use `/status`.)', true);
-    }
-
-    // Actions take time (start/stop/backup) — defer, then edit the reply with the outcome.
-    await this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 5 }).catch(() => {});
     try {
-      const res = await this.deps.runAction(target.id, name, userName);
-      await editOriginal((res && res.message) || (res && res.ok ? '✅ Done.' : '❌ Failed.'));
+      // ── Help (public) ──
+      if (name === 'commands') return reply(this._helpText(), true);
+
+      // ── Admin-only commands ──
+      if (ADMIN_COMMANDS.has(name)) {
+        if (!D.isAdmin(userId)) return reply('⛔ Only Omnex **admins** can use this command.', true);
+        if (name === 'serverid') {
+          const ref = this._opt(d, 'server');
+          const r = await D.resolveServerRef(ref);
+          return reply(r ? `🆔 **${r.name}** — \`${r.id}\`` : '⚠️ Server not found.', true);
+        }
+        if (name === 'link') {
+          const ref = this._opt(d, 'server') || this._opt(d, 'serverid');
+          const ch = this._opt(d, 'channel') || channelId;
+          if (!ref) return reply('⚠️ Pick a server (or give a server ID).', true);
+          await defer(true);
+          return edit((await D.linkChannel(ch, ref)).message);
+        }
+        if (name === 'account') {
+          const sub = (d.data.options && d.data.options[0]) || {};
+          const subOpts = {}; (sub.options || []).forEach(o => subOpts[o.name] = o.value);
+          const targetId = subOpts.user || subOpts.id;
+          const scope = subOpts.scope || 'server';
+          if (!targetId) return reply('⚠️ Provide a user (picker) or a user ID.', true);
+          let ctxId = null;
+          if (scope === 'server') {
+            const t = D.resolveServer(channelId);
+            if (!t || t === 'ambiguous') return reply("⚠️ Run this in the target server's channel, or use scope **Admin**.", true);
+            ctxId = t.id;
+          }
+          return reply((await D.accountChange(sub.name, String(targetId), scope, ctxId)).message, true);
+        }
+        if (name === 'create') {
+          const game = this._opt(d, 'game'), sname = this._opt(d, 'name'), password = this._opt(d, 'password') || '';
+          await defer(true);
+          return edit((await D.createServer(game, sname, password, userName)).message);
+        }
+        return; // handled
+      }
+
+      // ── Everything below needs the channel to resolve to a server ──
+      const target = D.resolveServer(channelId);
+      if (target === 'ambiguous') return reply('⚠️ More than one server is linked to this channel. Link each to its own channel with `/link`.', true);
+      if (!target) return reply("⚠️ This channel isn't linked to a server. An admin can link it with `/link server:<name>`.", true);
+
+      // ── Public read-only (status/map) ──
+      if (name === 'status' || name === 'map') {
+        await defer(false);
+        const res = name === 'status' ? await D.runAction(target.id, 'status', userName) : await D.getMapLink(target.id);
+        return edit(res.message);
+      }
+
+      // ── Per-server allow-listed (start/stop/restart/backup) ──
+      if (!D.isAllowed(userId, target.id)) return reply("⛔ You don't have access to commands for this server. (Anyone can use `/status`.)", true);
+      await defer(false);
+      const res = await D.runAction(target.id, name, userName);
+      return edit((res && res.message) || (res && res.ok ? '✅ Done.' : '❌ Failed.'));
     } catch (e) {
-      await editOriginal('❌ ' + (e.message || 'Command failed.'));
+      return reply('❌ ' + (e.message || 'Command failed.'), true);
     }
   }
 

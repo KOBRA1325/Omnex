@@ -813,13 +813,14 @@ function uniqueInstallDir(baseName) {
   return { dir: path.join(SERVERS_DIR, fallback), folder: fallback };
 }
 
-ipcMain.handle('install-server', async (e, config) => {
+async function createAndInstallServer(config) {
   const id = `srv_${Date.now()}`;
   const folderBase = sanitizeFolderName(config.name);
   const { dir: installDir } = uniqueInstallDir(folderBase);
   fs.mkdirSync(installDir, { recursive:true });
 
   const server = { id, name:config.name, game:config.game, icon:config.icon, fallback:config.fallback, port:config.port, installDir, status:'installing', mcType:config.mcType, mcVersion:config.mcVersion, steamPass:config.steamPass };
+  if (config.password) server.password = config.password; // best-effort; applied by config sync where supported
   // Palworld: default to showing in community server list (users can toggle off in config)
   if (config.game === 'Palworld') server.showInPublicList = true;
   appData.servers.push(server);
@@ -839,7 +840,8 @@ ipcMain.handle('install-server', async (e, config) => {
     emit('install-error', { serverId:id, error:err.message });
     return { ok:false, error:err.message };
   }
-});
+}
+ipcMain.handle('install-server', async (e, config) => createAndInstallServer(config));
 
 // ── UPDATE SERVER ─────────────────────────────────────────────────────────────
 ipcMain.handle('update-server', async (e, id) => {
@@ -3200,12 +3202,15 @@ function resolveWebhookChannelId(url) {
 // Rebuild channelId -> server(s) from each server's effective webhook channel.
 async function refreshDiscordChannelMap() {
   const map = {};
+  // 1) Webhook-derived channels (the feed channel doubles as the command channel).
   for (const s of appData.servers) {
+    s.discordChannelId = null;
     const url = serverDiscordWebhook(s.id);
-    if (!url) { s.discordChannelId = null; continue; }
-    const chan = await resolveWebhookChannelId(url);
-    s.discordChannelId = chan || null;
-    if (chan) (map[chan] = map[chan] || []).push(s.id);
+    if (url) { const chan = await resolveWebhookChannelId(url); if (chan) { s.discordChannelId = chan; (map[chan] = map[chan] || []).push(s.id); } }
+  }
+  // 2) Explicit /link bindings take priority — a linked channel maps ONLY to that server.
+  for (const s of appData.servers) {
+    if (s.discordCmdChannelId) map[s.discordCmdChannelId] = [s.id];
   }
   _discordChannelMap = map;
 }
@@ -3286,14 +3291,96 @@ async function discordRunAction(serverId, action, userName) {
   }
 }
 
+// Resolve a server by its id OR (case-insensitive) name — used by /link, /serverid.
+function discordResolveServerRef(ref) {
+  const r = String(ref || '').trim();
+  if (!r) return null;
+  return appData.servers.find(s => s.id === r) ||
+         appData.servers.find(s => s.name.toLowerCase() === r.toLowerCase()) || null;
+}
+
+// /map — the server's live map link (BlueMap by default). Minecraft only.
+async function discordGetMapLink(serverId) {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s) return { message: '⚠️ Server not found.' };
+  if (s.game !== 'Minecraft') return { message: `🗺 Maps are a Minecraft feature — **${s.name}** is ${s.game}.` };
+  let ip = 'YOUR_PUBLIC_IP';
+  try { const d = await fetchJSON('https://api.ipify.org?format=json'); if (d && d.ip) ip = d.ip; } catch (e) {}
+  const port = s.mapPort || 8100; // BlueMap default
+  return { message: `🗺 **${s.name}** map (BlueMap): http://${ip}:${port}\n*(Needs BlueMap running on the server and port ${port} forwarded.)*` };
+}
+
+// /link — bind a channel to a server explicitly (overrides webhook-derived linking).
+async function discordLinkChannel(channelId, ref) {
+  const s = discordResolveServerRef(ref);
+  if (!s) return { message: '⚠️ Server not found. Use the picker or `/serverid`.' };
+  if (!/^\d{5,}$/.test(String(channelId))) return { message: '⚠️ Invalid channel.' };
+  s.discordCmdChannelId = String(channelId);
+  saveData();
+  await refreshDiscordChannelMap();
+  return { message: `🔗 Linked <#${channelId}> to **${s.name}**. Commands run here now control it.` };
+}
+
+// /account add|remove — manage the global admin list or a server's allowlist.
+function discordAccountChange(action, targetId, scope, ctxServerId) {
+  const add = action === 'add';
+  const id = String(targetId || '').trim();
+  if (!/^\d{5,20}$/.test(id)) return { message: '⚠️ That doesn\'t look like a valid user ID.' };
+  if (scope === 'admin') {
+    const set = discordAllowedSet();
+    if (add) set.add(id); else set.delete(id);
+    appSettings.discordBotAllowedUsers = [...set].join(', ');
+    saveSettings(appSettings);
+    emit('settings-changed', appSettings); // refresh the Settings chips live
+    return { message: `${add ? '✅ Added' : '✅ Removed'} <@${id}> ${add ? 'to' : 'from'} **admins** (all servers).` };
+  }
+  const s = appData.servers.find(x => x.id === ctxServerId);
+  if (!s) return { message: '⚠️ No server is linked to this channel.' };
+  const set = new Set(String(s.discordAllowedUsers || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean));
+  if (add) set.add(id); else set.delete(id);
+  s.discordAllowedUsers = [...set].join(', ');
+  saveData();
+  return { message: `${add ? '✅ Added' : '✅ Removed'} <@${id}> ${add ? 'to' : 'from'} **${s.name}** command access.` };
+}
+
+// /create — make + install a new server with sensible defaults. Runs the install
+// in the background and returns immediately (installs can take a while).
+async function discordCreateServer(game, name, password, userName) {
+  game = String(game || '').trim();
+  name = String(name || '').trim();
+  if (!GAME_DEFAULT_PORTS[game]) return { message: `⚠️ Unknown game "${game}". Pick one from the list.` };
+  if (GAME_DEFS[game] && GAME_DEFS[game].type === 'import') return { message: `⚠️ ${game} is import-only — it can't be created remotely.` };
+  if (!name) return { message: '⚠️ Give the server a name.' };
+  if (appData.servers.some(s => s.name.toLowerCase() === name.toLowerCase())) return { message: `⚠️ A server named "${name}" already exists.` };
+
+  const config = { name, game, port: GAME_DEFAULT_PORTS[game] };
+  if (game === 'Minecraft') { config.mcType = 'vanilla'; config.mcVersion = 'latest'; }
+  if (password) config.password = String(password);
+
+  logEvent(null, 'DISCORD_CMD', `${userName || 'someone'} ran /create ${game} "${name}" from Discord`);
+  // Fire-and-forget the install; the Omnex UI shows live progress.
+  createAndInstallServer(config)
+    .then(r => { if (!r.ok) console.log('[discord] /create install failed:', r.error); })
+    .catch(() => {});
+  return { message: `🛠️ Creating **${name}** (${game})${game === 'Minecraft' ? ' — Vanilla, latest' : ''}. Install started; watch Omnex for progress.${password ? '\n*Password is stored; verify it in Omnex\'s config editor (varies by game).*' : ''}` };
+}
+
 function getDiscordBot() {
   if (!_discordBot) {
     _discordBot = new DiscordBot({
       log: (msg, level) => { try { console.log('[discord-bot]', msg); } catch (e) {} emit('discord-bot-log', { msg, level: level || 'dim' }); },
       onStatus: (status, info) => { _discordBotStatus = { status, info }; emit('discord-bot-status', { status, info }); },
       isAllowed: (userId, serverId) => discordAllowedFor(serverId).has(String(userId)),
+      isAdmin: (userId) => discordAllowedSet().has(String(userId)),
       resolveServer: (channelId) => resolveServerByChannel(channelId),
+      resolveServerRef: (ref) => { const s = discordResolveServerRef(ref); return s ? { id: s.id, name: s.name } : null; },
       runAction: (serverId, action, userName) => discordRunAction(serverId, action, userName),
+      listServers: () => appData.servers.map(s => ({ id: s.id, name: s.name, game: s.game })),
+      listCreatableGames: () => Object.keys(GAME_DEFAULT_PORTS).filter(g => !(GAME_DEFS[g] && GAME_DEFS[g].type === 'import')),
+      getMapLink: (serverId) => discordGetMapLink(serverId),
+      linkChannel: (channelId, ref) => discordLinkChannel(channelId, ref),
+      accountChange: (action, targetId, scope, ctxServerId) => discordAccountChange(action, targetId, scope, ctxServerId),
+      createServer: (game, name, password, userName) => discordCreateServer(game, name, password, userName),
     });
   }
   return _discordBot;
