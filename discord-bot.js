@@ -43,6 +43,13 @@ const COMMANDS = [
           { name: 'id',    description: 'Or a user ID', type: 3, required: false },
           { name: 'scope', description: 'Where (default: this server)', type: 3, required: false, choices: [
               { name: 'This server', value: 'server' }, { name: 'Admin (all servers)', value: 'admin' } ] } ] } ] },
+  { name: 'admin', description: '(admin) Manage global admins (control every server)', type: 1, options: [
+      { name: 'add', description: 'Grant admin — access to all servers', type: 1, options: [
+          { name: 'user', description: 'Pick a user', type: 6, required: false },
+          { name: 'id',   description: 'Or a user ID', type: 3, required: false } ] },
+      { name: 'remove', description: 'Revoke admin', type: 1, options: [
+          { name: 'user', description: 'Pick a user', type: 6, required: false },
+          { name: 'id',   description: 'Or a user ID', type: 3, required: false } ] } ] },
   { name: 'create', description: '(admin) Create & install a new server', type: 1, options: [
       { name: 'game',     description: 'Game', type: 3, required: true, autocomplete: true },
       { name: 'name',     description: 'Server name', type: 3, required: true },
@@ -51,7 +58,7 @@ const COMMANDS = [
 // Read-only commands anyone in the server may run — no allowlist needed.
 const PUBLIC_COMMANDS = new Set(['status', 'map', 'commands']);
 // Admin-only commands (global admin list required).
-const ADMIN_COMMANDS = new Set(['serverid', 'link', 'account', 'create']);
+const ADMIN_COMMANDS = new Set(['serverid', 'link', 'account', 'admin', 'create']);
 
 class DiscordBot {
   // deps: { log(msg, level), onStatus(status, info),
@@ -208,7 +215,8 @@ class DiscordBot {
       '',
       '__Admins only__',
       '• `/link server:<name>` — link this channel to a server',
-      '• `/account add|remove user:@who [scope]` — grant/revoke access',
+      '• `/admin add|remove user:@who` — grant/revoke **global admin** (all servers)',
+      '• `/account add|remove user:@who [scope]` — grant/revoke access (this server or admin)',
       '• `/serverid server:<name>` — show a server\'s ID',
       '• `/create game:<game> name:<name> [password]` — make a new server',
     ].join('\n');
@@ -282,6 +290,13 @@ class DiscordBot {
             ctxId = t.id;
           }
           return reply((await D.accountChange(sub.name, String(targetId), scope, ctxId)).message, true);
+        }
+        if (name === 'admin') {
+          const sub = (d.data.options && d.data.options[0]) || {};
+          const subOpts = {}; (sub.options || []).forEach(o => subOpts[o.name] = o.value);
+          const targetId = subOpts.user || subOpts.id;
+          if (!targetId) return reply('⚠️ Provide a user (picker) or a user ID.', true);
+          return reply((await D.accountChange(sub.name, String(targetId), 'admin', null)).message, true);
         }
         if (name === 'create') {
           const game = this._opt(d, 'game'), sname = this._opt(d, 'name'), password = this._opt(d, 'password') || '';
