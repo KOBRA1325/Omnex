@@ -767,6 +767,11 @@
             <div class="allow-chips" id="botAdminChips"></div>
             <div class="form-hint">These users can run commands on <b>every</b> server. For access to just one server, use that server's <b>Network panel</b>. In Discord: User Settings → Advanced → Developer Mode ON, then right-click a person → <b>Copy User ID</b>. (/status is open to everyone.)</div>
           </div>
+          <div>
+            <label class="form-label">Create password <span style="color:var(--text-dim); font-weight:400">(gates /create)</span></label>
+            <input type="password" class="form-input" id="setDiscordCreatePassword" placeholder="Blank = any admin can /create" style="width:100%; pointer-events:all" onchange="saveDiscordBot()">
+            <div class="form-hint">If set, <b>/create</b> in Discord also requires this exact password (on top of being an admin). It lives only here in Omnex and is never shown in Discord.</div>
+          </div>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
             <button class="btn-modal-cancel" style="pointer-events:all" onclick="saveDiscordBot()">💾 Save &amp; Connect</button>
             <button class="btn-modal-cancel" style="pointer-events:all" onclick="copyBotInvite(this)">🔗 Invite Link</button>

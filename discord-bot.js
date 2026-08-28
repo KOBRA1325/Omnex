@@ -53,7 +53,8 @@ const COMMANDS = [
   { name: 'create', description: '(admin) Create & install a new server', type: 1, options: [
       { name: 'game',     description: 'Game', type: 3, required: true, autocomplete: true },
       { name: 'name',     description: 'Server name', type: 3, required: true },
-      { name: 'password', description: 'Server password (optional)', type: 3, required: false } ] },
+      { name: 'password', description: 'Server password (optional)', type: 3, required: false },
+      { name: 'createkey', description: 'Omnex create password (if one is set)', type: 3, required: false } ] },
 ];
 // Read-only commands anyone in the server may run — no allowlist needed.
 const PUBLIC_COMMANDS = new Set(['status', 'map', 'commands']);
@@ -299,9 +300,10 @@ class DiscordBot {
           return reply((await D.accountChange(sub.name, String(targetId), 'admin', null)).message, true);
         }
         if (name === 'create') {
-          const game = this._opt(d, 'game'), sname = this._opt(d, 'name'), password = this._opt(d, 'password') || '';
+          const game = this._opt(d, 'game'), sname = this._opt(d, 'name');
+          const password = this._opt(d, 'password') || '', createKey = this._opt(d, 'createkey') || '';
           await defer(true);
-          return edit((await D.createServer(game, sname, password, userName)).message);
+          return edit((await D.createServer(game, sname, password, userName, createKey)).message);
         }
         return; // handled
       }

@@ -2972,6 +2972,7 @@ function loadSettings() {
     discordBotEnabled:   false, // two-way control: allow-listed users run /start etc. from Discord
     discordBotToken:     '',    // Discord bot token (secret; stays local)
     discordBotAllowedUsers: '', // comma/space-separated Discord user IDs allowed to run commands
+    discordCreatePassword: '',  // if set, /create requires this password (gate lives only in Omnex)
     maxConsoleLines:     500,
     defaultBackupKeep:   10,
     autoStartServers:    [],
@@ -3345,7 +3346,14 @@ function discordAccountChange(action, targetId, scope, ctxServerId) {
 
 // /create — make + install a new server with sensible defaults. Runs the install
 // in the background and returns immediately (installs can take a while).
-async function discordCreateServer(game, name, password, userName) {
+async function discordCreateServer(game, name, password, userName, createKey) {
+  // Optional extra gate: if a create password is configured in Omnex, /create
+  // requires it — so being an admin alone isn't enough. The password lives only
+  // in Omnex's settings and is never shown in Discord.
+  const gate = String(appSettings.discordCreatePassword || '');
+  if (gate && String(createKey || '') !== gate) {
+    return { message: '🔒 A create password is required (and it must match the one set in Omnex). Ask the Omnex owner.' };
+  }
   game = String(game || '').trim();
   name = String(name || '').trim();
   if (!GAME_DEFAULT_PORTS[game]) return { message: `⚠️ Unknown game "${game}". Pick one from the list.` };
@@ -3380,7 +3388,7 @@ function getDiscordBot() {
       getMapLink: (serverId) => discordGetMapLink(serverId),
       linkChannel: (channelId, ref) => discordLinkChannel(channelId, ref),
       accountChange: (action, targetId, scope, ctxServerId) => discordAccountChange(action, targetId, scope, ctxServerId),
-      createServer: (game, name, password, userName) => discordCreateServer(game, name, password, userName),
+      createServer: (game, name, password, userName, createKey) => discordCreateServer(game, name, password, userName, createKey),
     });
   }
   return _discordBot;
@@ -3398,6 +3406,7 @@ ipcMain.handle('save-discord-bot', async (e, cfg) => {
   appSettings.discordBotEnabled = !!(cfg && cfg.enabled);
   if (cfg && typeof cfg.token === 'string') appSettings.discordBotToken = cfg.token.trim();
   if (cfg && typeof cfg.allowed === 'string') appSettings.discordBotAllowedUsers = cfg.allowed.trim();
+  if (cfg && typeof cfg.createPassword === 'string') appSettings.discordCreatePassword = cfg.createPassword;
   saveSettings(appSettings);
   await startDiscordBot();
   return { ok: true };

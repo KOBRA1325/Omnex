@@ -2426,6 +2426,7 @@ function applySettingsToUI() {
   const webhookEl=document.getElementById('setDiscordWebhookUrl');
   if(webhookEl) webhookEl.value=appSettings.discordWebhookUrl||'';
   const botTok=document.getElementById('setDiscordBotToken'); if(botTok) botTok.value=appSettings.discordBotToken||'';
+  const botCreate=document.getElementById('setDiscordCreatePassword'); if(botCreate) botCreate.value=appSettings.discordCreatePassword||'';
   try { renderAllowChips('botAdminChips', getAdminIds(), removeAdminUser); } catch(e) {}
   try { window.nexus.getDiscordBotStatus().then(renderBotStatus).catch(()=>{}); } catch(e) {}
   const sels={setMaxConsoleLines:'maxConsoleLines',setConsoleFontSize:'consoleFontSize',setDefaultBackupKeep:'defaultBackupKeep',setAppTextScale:'appTextScale'};
@@ -2478,8 +2479,10 @@ async function saveDiscordBot() {
     enabled: !!appSettings.discordBotEnabled,
     token:   (document.getElementById('setDiscordBotToken')?.value || '').trim(),
     allowed: appSettings.discordBotAllowedUsers || '', // managed by the admin chips
+    createPassword: (document.getElementById('setDiscordCreatePassword')?.value || ''),
   };
   appSettings.discordBotToken = cfg.token;
+  appSettings.discordCreatePassword = cfg.createPassword;
   try { await window.nexus.saveDiscordBot(cfg); showToast('🤖', cfg.enabled ? 'Bot settings saved — connecting…' : 'Bot settings saved'); }
   catch(e) { showToast('❌', e.message || 'Failed to save'); }
 }
