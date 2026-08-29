@@ -1018,9 +1018,10 @@ function renderHeader() {
   if(btnMore)    btnMore.disabled    = false;
   if(btnLogs)    btnLogs.disabled    = false;
   if(btnMods) {
-    const moddable = s.game==='Minecraft' && ['paper','fabric','forge','quilt'].includes(s.mcType);
-    btnMods.style.display = moddable ? '' : 'none';
-    btnMods.disabled = !moddable || isBusy;
+    // Show for every Minecraft server so it's discoverable; the browser itself
+    // explains when a server (Vanilla) can't load mods.
+    btnMods.style.display = s.game==='Minecraft' ? '' : 'none';
+    btnMods.disabled = false;
   }
   if(btnWS) btnWS.style.display = 'none';
   if(btnRemove) btnRemove.disabled = isBusy;
@@ -2229,7 +2230,10 @@ let modInstalledProjects = new Set();
 
 async function openModManager(){
   const s=getActive(); if(!s) return;
-  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){showToast('ℹ️','Mods are for Paper, Fabric, Forge, and Quilt servers');return;}
+  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
+    showToast('ℹ️','This is a Vanilla server — mods need a loader. Create a new server with Fabric, Paper, Forge, or Quilt to add mods.');
+    return;
+  }
   const title=document.getElementById('modModalTitle'); if(title) title.textContent=`${s.name} · ${s.mcType} ${s.mcVersion||''}`;
   modActiveCat=''; const q=document.getElementById('modSearchQuery'); if(q) q.value='';
   renderModCats();
