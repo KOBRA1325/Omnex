@@ -147,6 +147,7 @@ contextBridge.exposeInMainWorld('nexus', {
   installMod:            (opts)   => ipcRenderer.invoke('install-mod', opts),
   getInstalledMods:      (id)     => ipcRenderer.invoke('get-installed-mods', id),
   getModProjects:        (id)     => ipcRenderer.invoke('get-mod-projects', id),
+  detectMcLoader:        (id)     => ipcRenderer.invoke('detect-mc-loader', id),
   deleteMod:             (serverId, modPath) => ipcRenderer.invoke('delete-mod', { serverId, modPath }),
 
   // Auto-restart

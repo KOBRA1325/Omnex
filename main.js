@@ -2890,6 +2890,31 @@ ipcMain.handle('open-server-folder', (e, id) => {
 function modsDirFor(server) {
   return path.join(server.installDir, server.mcType === 'paper' ? 'plugins' : 'mods');
 }
+
+// Best-effort: figure out a Minecraft server's mod loader from its install folder.
+// Used to backfill `mcType` for servers where it wasn't recorded (older installs).
+function detectMcLoader(dir) {
+  try {
+    if (!dir || !fs.existsSync(dir)) return null;
+    const files = fs.readdirSync(dir);
+    const low = files.map(f => f.toLowerCase());
+    const has = re => low.some(f => re.test(f));
+    const exists = (...p) => fs.existsSync(path.join(dir, ...p));
+    if (has(/quilt-server-launch.*\.jar/) || exists('.quilt') || exists('libraries', 'org', 'quiltmc')) return 'quilt';
+    if (has(/fabric-server-(launch|launcher|mc).*\.jar/) || exists('.fabric') || exists('libraries', 'net', 'fabricmc')) return 'fabric';
+    if (has(/paper(mc|-).*\.jar/)) return 'paper';
+    if (exists('run.bat') || exists('libraries', 'net', 'minecraftforge') || exists('libraries', 'net', 'neoforged') || has(/(neo)?forge.*\.jar/)) return 'forge';
+    return null;
+  } catch (e) { return null; }
+}
+// Detect + persist the loader for a Minecraft server (returns the effective type).
+ipcMain.handle('detect-mc-loader', (e, id) => {
+  const s = appData.servers.find(x => x.id === id);
+  if (!s || s.game !== 'Minecraft' || !s.installDir) return { loader: (s && s.mcType) || 'vanilla' };
+  const loader = detectMcLoader(s.installDir);
+  if (loader && s.mcType !== loader) { s.mcType = loader; saveData(); }
+  return { loader: s.mcType || 'vanilla', detected: !!loader };
+});
 ipcMain.handle('search-modrinth', async (e, { query, loader, gameVersion, sort, category, limit }) => {
   try {
     const facets = [[`project_type:mod`]];

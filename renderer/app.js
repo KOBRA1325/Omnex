@@ -902,7 +902,18 @@ async function selectServer(id) {
   } catch(e) {}
   if (id === activeId && s) {
     appendLog('dim', `— Viewing ${s.name} [${s.game}] · Port ${s.port} —`);
-    if (s.game === 'Minecraft') checkJavaStatus(s.id);
+    if (s.game === 'Minecraft') {
+      checkJavaStatus(s.id);
+      // Backfill the mod loader from the install folder if it wasn't recorded
+      // (older installs), so the header + Mods browser know it's Fabric/Forge/etc.
+      if (!['paper','fabric','forge','quilt'].includes(s.mcType)) {
+        window.nexus.detectMcLoader(s.id).then(r => {
+          if (r && r.detected && r.loader && r.loader !== s.mcType && id === activeId) {
+            s.mcType = r.loader; renderHeader();
+          }
+        }).catch(()=>{});
+      }
+    }
   }
   try {
     const bundle = await window.nexus.getServerBundle(id);
@@ -2230,6 +2241,10 @@ let modInstalledProjects = new Set();
 
 async function openModManager(){
   const s=getActive(); if(!s) return;
+  // If the loader wasn't recorded, detect it from the install folder first.
+  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
+    try { const r=await window.nexus.detectMcLoader(s.id); if(r&&r.detected&&r.loader){ s.mcType=r.loader; renderHeader(); } } catch(e){}
+  }
   if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
     showToast('ℹ️','This is a Vanilla server — mods need a loader. Create a new server with Fabric, Paper, Forge, or Quilt to add mods.');
     return;
