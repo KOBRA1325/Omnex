@@ -55,11 +55,14 @@ const COMMANDS = [
       { name: 'name',     description: 'Server name', type: 3, required: true },
       { name: 'password', description: 'Server password (optional)', type: 3, required: false },
       { name: 'createkey', description: 'Omnex create password (if one is set)', type: 3, required: false } ] },
+  { name: 'deleteserver', description: '(admin) Delete a server — needs the admin password', type: 1, options: [
+      { name: 'server',        description: 'Server to delete', type: 3, required: true, autocomplete: true },
+      { name: 'adminpassword', description: 'Omnex admin password', type: 3, required: true } ] },
 ];
 // Read-only commands anyone in the server may run — no allowlist needed.
 const PUBLIC_COMMANDS = new Set(['status', 'map', 'commands']);
 // Admin-only commands (global admin list required).
-const ADMIN_COMMANDS = new Set(['serverid', 'link', 'account', 'admin', 'create']);
+const ADMIN_COMMANDS = new Set(['serverid', 'link', 'account', 'admin', 'create', 'deleteserver']);
 
 class DiscordBot {
   // deps: { log(msg, level), onStatus(status, info),
@@ -220,6 +223,7 @@ class DiscordBot {
       '• `/account add|remove user:@who [scope]` — grant/revoke access (this server or admin)',
       '• `/serverid server:<name>` — show a server\'s ID',
       '• `/create game:<game> name:<name> [password]` — make a new server',
+      '• `/deleteserver server:<name> adminpassword:<pw>` — delete a server',
     ].join('\n');
   }
 
@@ -304,6 +308,11 @@ class DiscordBot {
           const password = this._opt(d, 'password') || '', createKey = this._opt(d, 'createkey') || '';
           await defer(true);
           return edit((await D.createServer(game, sname, password, userName, createKey)).message);
+        }
+        if (name === 'deleteserver') {
+          const ref = this._opt(d, 'server'), pw = this._opt(d, 'adminpassword') || '';
+          await defer(true);
+          return edit((await D.deleteServer(ref, pw, userName)).message);
         }
         return; // handled
       }

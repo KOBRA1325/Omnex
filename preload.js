@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('nexus', {
   onEventLogged:     (cb) => ipcRenderer.on('event-logged',      (_, d) => cb(d)),
   onServerStopped:   (cb) => ipcRenderer.on('server-stopped',    (_, d) => cb(d)),
   onServerAdded:     (cb) => ipcRenderer.on('server-added',      (_, d) => cb(d)),
+  onServerRemoved:   (cb) => ipcRenderer.on('server-removed',    (_, d) => cb(d)),
   onServerStatus:    (cb) => ipcRenderer.on('server-status',     (_, d) => cb(d)),
   onInstallComplete: (cb) => ipcRenderer.on('install-complete',  (_, d) => cb(d)),
   onInstallError:    (cb) => ipcRenderer.on('install-error',     (_, d) => cb(d)),

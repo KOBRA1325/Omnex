@@ -705,7 +705,7 @@ ipcMain.handle('clear-event-log', (e, id) => { try { fs.writeFileSync(eventLogPa
 ipcMain.handle('get-schedules', () => appData.schedules);
 ipcMain.handle('get-app-version', () => APP_VERSION);
 
-ipcMain.handle('remove-server', async (e, id) => {
+async function removeServerById(id) {
   if (serverProcesses[id]) await killServer(id);
   const srv = appData.servers.find(s=>s.id===id);
   if (srv) {
@@ -724,8 +724,11 @@ ipcMain.handle('remove-server', async (e, id) => {
   delete consoleHistory[id];
   delete activityHistory[id]; delete _lastActivity[id];
   try { fs.rmSync(eventLogPath(id), { force: true }); } catch(e) {}
-  saveData(); return true;
-});
+  saveData();
+  emit('server-removed', { serverId: id });
+  return true;
+}
+ipcMain.handle('remove-server', async (e, id) => removeServerById(id));
 
 ipcMain.handle('save-schedule',   (e,s)  => { const i=appData.schedules.findIndex(x=>x.id===s.id); if(i>=0) appData.schedules[i]=s; else appData.schedules.push({...s,id:`sched_${Date.now()}`}); saveData(); return appData.schedules; });
 ipcMain.handle('toggle-schedule', (e,id) => { const s=appData.schedules.find(s=>s.id===id); if(s){s.active=!s.active; saveData();} return appData.schedules; });
@@ -3373,6 +3376,26 @@ async function discordCreateServer(game, name, password, userName, createKey) {
   return { message: `🛠️ Creating **${name}** (${game})${game === 'Minecraft' ? ' — Vanilla, latest' : ''}. Install started; watch Omnex for progress.${password ? '\n*Password is stored; verify it in Omnex\'s config editor (varies by game).*' : ''}` };
 }
 
+// /deleteserver — remove a server (its Omnex-managed folder + entry). Destructive,
+// so it ALWAYS requires the Omnex admin password: if none is set, remote delete is
+// refused entirely. Reuses the same safe delete as the UI (only touches SERVERS_DIR).
+async function discordDeleteServer(ref, adminPassword, userName) {
+  const gate = String(appSettings.discordCreatePassword || '');
+  if (!gate) return { message: '🔒 Remote delete is disabled — set an admin password in Omnex (Settings → Discord → Bot control) first.' };
+  if (String(adminPassword || '') !== gate) return { message: '🔒 Wrong admin password.' };
+  const s = discordResolveServerRef(ref);
+  if (!s) return { message: '⚠️ Server not found.' };
+  if (serverProcesses[s.id]) return { message: `⚠️ **${s.name}** is running — stop it first with \`/stop\`.` };
+  const nm = s.name;
+  logEvent(s.id, 'DISCORD_CMD', `${userName || 'someone'} ran /deleteserver "${nm}" from Discord`);
+  try {
+    await removeServerById(s.id);
+    return { message: `🗑️ Deleted **${nm}** and its Omnex files.` };
+  } catch (e) {
+    return { message: `❌ Delete failed: ${e.message || e}` };
+  }
+}
+
 function getDiscordBot() {
   if (!_discordBot) {
     _discordBot = new DiscordBot({
@@ -3389,6 +3412,7 @@ function getDiscordBot() {
       linkChannel: (channelId, ref) => discordLinkChannel(channelId, ref),
       accountChange: (action, targetId, scope, ctxServerId) => discordAccountChange(action, targetId, scope, ctxServerId),
       createServer: (game, name, password, userName, createKey) => discordCreateServer(game, name, password, userName, createKey),
+      deleteServer: (ref, adminPassword, userName) => discordDeleteServer(ref, adminPassword, userName),
     });
   }
   return _discordBot;

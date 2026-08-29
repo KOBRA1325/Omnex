@@ -2797,7 +2797,7 @@ async function init(){
   appendLog('dim','Omnex ready. Select or add a server to begin.');
 }
 function wireEvents(){
-  ['console-line','server-stopped','server-added','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
+  ['console-line','server-stopped','server-added','server-removed','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
   window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId) appendActivity(entry); });
   try { window.nexus.onDiscordBotStatus(renderBotStatus); } catch(e) {}
@@ -2815,6 +2815,14 @@ function wireEvents(){
     renderSidebar();
     selectServer(server.id);
     if(currentView==='dashboard') renderDashboard();
+  });
+  window.nexus.onServerRemoved(({serverId})=>{
+    servers = servers.filter(s=>s.id!==serverId);
+    if (activeId===serverId) { activeId = null; const out=document.getElementById('consoleOutput'); if(out) out.innerHTML=''; renderHeader(); }
+    renderSidebar();
+    if (activeId) selectServer(activeId); else if (servers[0]) selectServer(servers[0].id);
+    if(currentView==='dashboard') renderDashboard();
+    showToast('🗑️','A server was removed');
   });
   window.nexus.onInstallComplete(async ({serverId})=>{
     // Re-fetch full server data so execPath is updated
