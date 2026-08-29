@@ -2932,6 +2932,14 @@ ipcMain.handle('search-modrinth', async (e, { query, loader, gameVersion, sort, 
   } catch(e) { return { ok: false, hits: [], error: e.message }; }
 });
 
+// Full project details for the "read more" view (long description, gallery, links).
+ipcMain.handle('get-modrinth-project', async (e, projectId) => {
+  try {
+    const data = await fetchJSON(`https://api.modrinth.com/v2/project/${projectId}`);
+    return { ok: true, project: data };
+  } catch(e) { return { ok: false, error: e.message }; }
+});
+
 ipcMain.handle('get-modrinth-versions', async (e, { projectId, gameVersion, loader }) => {
   try {
     const params = new URLSearchParams();

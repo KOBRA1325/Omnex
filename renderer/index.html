@@ -590,9 +590,9 @@
       <button class="btn-modal-cancel" onclick="closeModModal()">✕ Close</button>
     </div>
     <!-- Toolbar: search + sort -->
-    <div class="mod-toolbar">
+    <div class="mod-toolbar" id="modToolbar">
       <input class="form-input" id="modSearchQuery" placeholder="Search Modrinth…"
-        onkeydown="if(event.key==='Enter') searchMods()" style="flex:1; pointer-events:all" />
+        oninput="onModSearchInput()" style="flex:1; pointer-events:all" />
       <select class="config-input" id="modSort" onchange="searchMods()" style="pointer-events:all; width:160px">
         <option value="relevance">Relevance</option>
         <option value="downloads">Most downloaded</option>
@@ -600,12 +600,11 @@
         <option value="newest">Newest</option>
         <option value="follows">Most followed</option>
       </select>
-      <button class="btn-modal-save" onclick="searchMods()">Search</button>
     </div>
     <!-- Category chips -->
     <div class="mod-cats" id="modCats"></div>
     <!-- Content: browse grid + installed sidebar -->
-    <div class="mod-body">
+    <div class="mod-body" id="modBrowse">
       <div class="mod-grid" id="modSearchResults">
         <div class="empty-msg-sm" style="padding:20px">Search Modrinth, or pick a category to browse.</div>
       </div>
@@ -616,6 +615,8 @@
         </div>
       </div>
     </div>
+    <!-- Detail (read more) view -->
+    <div class="mod-detail" id="modDetail" style="display:none"></div>
   </div>
 </div>
 

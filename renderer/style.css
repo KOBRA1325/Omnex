@@ -1758,6 +1758,42 @@ html, body { width: 100%; height: 100%; overflow: hidden; }
 .mod-installed-meta { font-size: 9px; color: var(--text-dim); flex-shrink: 0; }
 .mod-remove-btn { background: transparent; border: none; color: var(--text-dim); cursor: pointer; pointer-events: all; font-size: 12px; padding: 2px 4px; flex-shrink: 0; }
 .mod-remove-btn:hover { color: var(--red, #ff3b5c); }
+.mod-card { cursor: pointer; }
+
+/* Mod detail ("read more") view */
+.mod-detail { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; pointer-events: all; }
+.mod-detail::-webkit-scrollbar { width: 5px; }
+.mod-detail::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.mod-back {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border); color: var(--text-bright);
+  font-family: 'Rajdhani', sans-serif; font-weight: 600; font-size: 12px; padding: 5px 12px;
+  border-radius: 6px; cursor: pointer; pointer-events: all; margin-bottom: 14px;
+}
+.mod-back:hover { border-color: rgba(0,229,255,0.35); }
+.mod-detail-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.mod-detail-icon { width: 64px; height: 64px; border-radius: 12px; overflow: hidden; flex-shrink: 0; background: var(--panel); display: flex; align-items: center; justify-content: center; font-size: 30px; }
+.mod-detail-icon img { width: 100%; height: 100%; object-fit: cover; }
+.mod-detail-title { font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 22px; color: var(--text-bright); }
+.mod-detail-sub { font-size: 13px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
+.mod-detail-stats { display: flex; flex-wrap: wrap; gap: 16px; font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.mod-links { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.mod-link, .md-link {
+  background: rgba(0,229,255,0.06); border: 1px solid rgba(0,229,255,0.25); color: var(--accent);
+  font-family: 'Rajdhani', sans-serif; font-weight: 600; font-size: 12px; padding: 4px 11px;
+  border-radius: 6px; cursor: pointer; pointer-events: all;
+}
+.mod-link:hover, .md-link:hover { background: rgba(0,229,255,0.13); }
+.mod-gallery { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 8px; }
+.mod-gal { height: 130px; border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; }
+.mod-body-md { font-family: 'Rajdhani', sans-serif; font-size: 14px; color: var(--text); line-height: 1.6; }
+.mod-body-md h3 { font-size: 17px; color: var(--text-bright); margin: 16px 0 6px; }
+.mod-body-md h4 { font-size: 14px; color: var(--text-bright); margin: 13px 0 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+.mod-body-md p { margin: 8px 0; }
+.mod-body-md ul { margin: 8px 0; padding-left: 20px; }
+.mod-body-md li { margin: 3px 0; }
+.mod-body-md code { font-family: 'Share Tech Mono', monospace; font-size: 12px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px; }
+.mod-body-md .md-pre { font-family: 'Share Tech Mono', monospace; font-size: 12px; background: #07090d; border: 1px solid var(--border); border-radius: 6px; padding: 10px; overflow-x: auto; white-space: pre-wrap; }
+.mod-body-md strong { color: var(--text-bright); }
 
 /* ── Schedule backup icon ── */
 .sched-icon.backup { background: rgba(255,215,0,0.1); }

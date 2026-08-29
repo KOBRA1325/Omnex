@@ -2251,6 +2251,7 @@ async function openModManager(){
   }
   const title=document.getElementById('modModalTitle'); if(title) title.textContent=`${s.name} · ${s.mcType} ${s.mcVersion||''}`;
   modActiveCat=''; const q=document.getElementById('modSearchQuery'); if(q) q.value='';
+  closeModDetail(); // always open on the browse view
   renderModCats();
   showModal('modModal');
   await refreshInstalledProjects();
@@ -2265,6 +2266,10 @@ function renderModCats(){
     `<button class="mod-cat ${modActiveCat===val?'active':''}" onclick="toggleModCat('${val}')">${label}</button>`).join('');
 }
 function toggleModCat(val){ modActiveCat = (modActiveCat===val)?'':val; renderModCats(); searchMods(); }
+
+// Live search — debounce typing so results update without pressing Enter.
+let _modSearchTimer=null;
+function onModSearchInput(){ clearTimeout(_modSearchTimer); _modSearchTimer=setTimeout(searchMods, 350); }
 
 async function refreshInstalledProjects(){
   const s=getActive(); if(!s) return;
@@ -2305,7 +2310,7 @@ function modCardHtml(mod){
   const d=mod.downloads||0; const dls = d>=1000 ? (d/1000).toFixed(d>=100000?0:1)+'k' : String(d);
   const cats=(mod.display_categories||mod.categories||[]).slice(0,3).map(c=>`<span class="mod-card-cat">${escapeHtml(c)}</span>`).join('');
   const jt=escapeHtml(mod.title||'').replace(/'/g,"\\'");
-  return `<div class="mod-card">
+  return `<div class="mod-card" onclick="openModDetail('${mod.project_id}')" title="Click to read more">
     <div class="mod-card-top">
       <div class="mod-card-icon">${mod.icon_url?`<img src="${escapeHtml(mod.icon_url)}" alt="" onerror="this.parentNode.textContent='📦'">`:'📦'}</div>
       <div class="mod-card-head">
@@ -2317,7 +2322,7 @@ function modCardHtml(mod){
     <div class="mod-card-cats">${cats}</div>
     <div class="mod-card-foot">
       <span class="mod-card-dls">⬇ ${dls}</span>
-      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="installModFromSearch('${mod.project_id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="event.stopPropagation(); installModFromSearch('${mod.project_id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
     </div>
   </div>`;
 }
@@ -2349,6 +2354,76 @@ async function deleteMod(modPath){
   renderInstalledMods();
   const grid=document.getElementById('modSearchResults');
   if(grid && grid.querySelector('.mod-card')) searchMods(); // refresh install badges
+}
+
+// ── Mod detail ("read more") ──────────────────────────────────────────────────
+function toggleModBrowse(show){
+  ['modToolbar','modCats','modBrowse'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display = show?'':'none'; });
+}
+function closeModDetail(){
+  const box=document.getElementById('modDetail'); if(box){ box.style.display='none'; box.innerHTML=''; }
+  toggleModBrowse(true);
+}
+async function openModDetail(projectId){
+  const box=document.getElementById('modDetail'); if(!box) return;
+  toggleModBrowse(false);
+  box.style.display='block';
+  box.innerHTML='<button class="mod-back" onclick="closeModDetail()">← Back</button><div class="empty-msg-sm" style="padding:24px">Loading…</div>';
+  try {
+    const r=await window.nexus.getModrinthProject(projectId);
+    if(!r.ok||!r.project){ box.innerHTML='<button class="mod-back" onclick="closeModDetail()">← Back</button><div class="empty-msg-sm" style="padding:24px">Could not load this mod.</div>'; return; }
+    box.innerHTML=modDetailHtml(r.project);
+    box.scrollTop=0;
+  } catch(e){ box.innerHTML='<button class="mod-back" onclick="closeModDetail()">← Back</button><div class="empty-msg-sm" style="padding:24px">Failed to load.</div>'; }
+}
+function modDetailHtml(p){
+  const installed = modInstalledProjects.has(p.id);
+  const d=p.downloads||0; const dls=d>=1000?(d/1000).toFixed(d>=100000?0:1)+'k':String(d);
+  const cats=(p.categories||[]).map(c=>`<span class="mod-card-cat">${escapeHtml(c)}</span>`).join('');
+  const jt=escapeHtml(p.title||'').replace(/'/g,"\\'");
+  const slug=escapeHtml(p.slug||p.id);
+  const gallery=(p.gallery||[]).slice(0,8).map(g=>`<img class="mod-gal" src="${escapeHtml(g.url)}" alt="" onerror="this.style.display='none'">`).join('');
+  const link=(url,label)=>`<button class="mod-link" onclick="window.nexus.openExternal('${String(url).replace(/'/g,'%27')}')">${label}</button>`;
+  const links=[ link(`https://modrinth.com/mod/${slug}`,'🔗 Modrinth') ];
+  if(p.source_url)  links.push(link(p.source_url,'💻 Source'));
+  if(p.wiki_url)    links.push(link(p.wiki_url,'📖 Wiki'));
+  if(p.issues_url)  links.push(link(p.issues_url,'🐞 Issues'));
+  if(p.discord_url) links.push(link(p.discord_url,'💬 Discord'));
+  return `<button class="mod-back" onclick="closeModDetail()">← Back to browse</button>
+    <div class="mod-detail-head">
+      <div class="mod-detail-icon">${p.icon_url?`<img src="${escapeHtml(p.icon_url)}" onerror="this.parentNode.textContent='📦'">`:'📦'}</div>
+      <div style="flex:1; min-width:0">
+        <div class="mod-detail-title">${escapeHtml(p.title||'')}</div>
+        <div class="mod-detail-sub">${escapeHtml(p.description||'')}</div>
+        <div class="mod-card-cats" style="margin-top:7px">${cats}</div>
+      </div>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="installModFromSearch('${p.id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
+    </div>
+    <div class="mod-detail-stats">
+      <span>⬇ ${dls} downloads</span>${p.followers!=null?`<span>❤ ${p.followers.toLocaleString()} followers</span>`:''}${p.updated?`<span>🕓 Updated ${new Date(p.updated).toLocaleDateString()}</span>`:''}${p.license&&p.license.id?`<span>⚖ ${escapeHtml(p.license.id)}</span>`:''}
+    </div>
+    <div class="mod-links">${links.join('')}</div>
+    ${gallery?`<div class="mod-gallery">${gallery}</div>`:''}
+    <div class="mod-body-md">${mdToHtml(p.body||'No description provided.')}</div>`;
+}
+// Tiny, safe markdown → HTML for the mod description (escapes first; strips images/raw HTML).
+function mdToHtml(md){
+  let s=String(md||'');
+  s=s.replace(/<!--[\s\S]*?-->/g,'');
+  s=s.replace(/!\[[^\]]*\]\([^)]*\)/g,'');   // drop images
+  s=s.replace(/<[^>]+>/g,'');                 // strip raw HTML
+  s=escapeHtml(s);
+  s=s.replace(/```([\s\S]*?)```/g,(m,c)=>`<pre class="md-pre">${c.replace(/^\n/,'')}</pre>`);
+  s=s.replace(/^######\s?(.*)$/gm,'<h4>$1</h4>').replace(/^#####\s?(.*)$/gm,'<h4>$1</h4>')
+     .replace(/^####\s?(.*)$/gm,'<h4>$1</h4>').replace(/^###\s?(.*)$/gm,'<h4>$1</h4>')
+     .replace(/^##\s?(.*)$/gm,'<h3>$1</h3>').replace(/^#\s?(.*)$/gm,'<h3>$1</h3>');
+  s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,(m,t,u)=>`<button class="md-link" onclick="window.nexus.openExternal('${u.replace(/'/g,'%27')}')">${t}</button>`);
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  s=s.replace(/^[\s]*[-*]\s+(.*)$/gm,'<li>$1</li>');
+  s=s.replace(/((?:<li>[\s\S]*?<\/li>\s*)+)/g, m=>`<ul>${m.trim()}</ul>`);
+  s=s.split(/\n{2,}/).map(b=>{ const t=b.trim(); if(!t) return ''; return /^<(h\d|ul|pre|li)/.test(t)?t:`<p>${t.replace(/\n/g,'<br>')}</p>`; }).join('');
+  return s;
 }
 
 // ── Workshop Modal (Arma 3) ───────────────────────────────────────────────────
