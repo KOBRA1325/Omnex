@@ -2212,59 +2212,119 @@ async function clearEventLog() {
   await renderEventLog();
 }
 
-// ── Mod Manager (Minecraft) ───────────────────────────────────────────────────
+// ── Mod Manager (Minecraft) — Modrinth-style browser ──────────────────────────
+const MOD_CATEGORIES = [
+  ['Performance','optimization'], ['Adventure','adventure'], ['Tech','technology'],
+  ['Magic','magic'], ['Utility','utility'], ['Decoration','decoration'],
+  ['Library','library'], ['Worldgen','worldgen'], ['Mobs','mobs'],
+  ['Storage','storage'], ['Food','food'], ['Equipment','equipment'],
+];
+let modActiveCat = '';
+let modInstalledProjects = new Set();
+
 async function openModManager(){
   const s=getActive(); if(!s) return;
-  if(!['paper','fabric','forge'].includes(s.mcType)){showToast('ℹ️','Mod manager is for Paper, Fabric, and Forge');return;}
-  const title=document.getElementById('modModalTitle'); if(title) title.textContent=`${s.mcType} · ${s.mcVersion||''}`;
+  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){showToast('ℹ️','Mods are for Paper, Fabric, Forge, and Quilt servers');return;}
+  const title=document.getElementById('modModalTitle'); if(title) title.textContent=`${s.name} · ${s.mcType} ${s.mcVersion||''}`;
+  modActiveCat=''; const q=document.getElementById('modSearchQuery'); if(q) q.value='';
+  renderModCats();
   showModal('modModal');
+  await refreshInstalledProjects();
   renderInstalledMods();
+  searchMods(); // populate immediately (popular for this loader/version)
 }
 function closeModModal(){hideModal('modModal');}
+
+function renderModCats(){
+  const box=document.getElementById('modCats'); if(!box) return;
+  box.innerHTML = MOD_CATEGORIES.map(([label,val])=>
+    `<button class="mod-cat ${modActiveCat===val?'active':''}" onclick="toggleModCat('${val}')">${label}</button>`).join('');
+}
+function toggleModCat(val){ modActiveCat = (modActiveCat===val)?'':val; renderModCats(); searchMods(); }
+
+async function refreshInstalledProjects(){
+  const s=getActive(); if(!s) return;
+  try { modInstalledProjects = new Set(await window.nexus.getModProjects(s.id)); } catch(e){ modInstalledProjects=new Set(); }
+}
+
 async function renderInstalledMods(){
   const s=getActive(); if(!s) return;
   const list=document.getElementById('installedModList'); if(!list) return;
   try {
     const mods=await window.nexus.getInstalledMods(s.id);
-    if(!mods.length){list.innerHTML='<div class="empty-msg-sm">No mods installed yet.</div>';return;}
+    const cnt=document.getElementById('installedModCount'); if(cnt) cnt.textContent = mods.length?`(${mods.length})`:'';
+    if(!mods.length){list.innerHTML='<div class="empty-msg-sm" style="padding:10px">No mods installed yet.</div>';return;}
     list.innerHTML=mods.map(m=>`<div class="mod-installed-item">
-      <div class="mod-installed-name">${escapeHtml(m.name)}</div>
-      <div class="mod-installed-size">${formatBytes(m.size)}</div>
-      <button class="btn-storage-action btn-warn" onclick="deleteMod('${m.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">🗑</button>
+      <div class="mod-installed-name" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</div>
+      <div class="mod-installed-meta">${formatBytes(m.size)}</div>
+      <button class="mod-remove-btn" title="Remove" onclick="deleteMod('${m.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">🗑</button>
     </div>`).join('');
   } catch(e){list.innerHTML='<div class="empty-msg-sm">Could not load mods.</div>';}
 }
+
 async function searchMods(){
-  const s=getActive(); const q=document.getElementById('modSearchQuery')?.value.trim(); if(!q||!s) return;
-  document.getElementById('modSearchResults').innerHTML='<div class="empty-msg-sm">Searching Modrinth...</div>';
-  try {
-    const result=await window.nexus.searchModrinth({query:q,loader:s.mcType,gameVersion:s.mcVersion});
-    if(!result.hits?.length){document.getElementById('modSearchResults').innerHTML='<div class="empty-msg-sm">No results found.</div>';return;}
-    document.getElementById('modSearchResults').innerHTML=result.hits.map(mod=>`
-      <div class="mod-result-item">
-        <div class="mod-result-icon">${mod.icon_url?`<img src="${mod.icon_url}" alt="">`:'📦'}</div>
-        <div class="mod-result-info">
-          <div class="mod-result-name">${escapeHtml(mod.title)}</div>
-          <div class="mod-result-desc">${escapeHtml(mod.description?.slice(0,80)||'')}...</div>
-          <div class="mod-result-meta">${mod.downloads?.toLocaleString()} downloads</div>
-        </div>
-        <button class="btn-storage-action" onclick="installModFromSearch('${mod.project_id}','${escapeHtml(mod.title)}')">⬇</button>
-      </div>`).join('');
-  } catch(e){document.getElementById('modSearchResults').innerHTML='<div class="empty-msg-sm">Search failed.</div>';}
-}
-async function installModFromSearch(projectId,title){
   const s=getActive(); if(!s) return;
-  const result=await window.nexus.getModrinthVersions({projectId,gameVersion:s.mcVersion,loader:s.mcType});
-  if(!result.versions?.length){showToast('❌',`No compatible version for ${s.mcType} ${s.mcVersion}`);return;}
-  const file=result.versions[0].files?.find(f=>f.primary)||result.versions[0].files?.[0];
-  if(!file){showToast('❌','No download file found');return;}
-  showToast('⬇️',`Installing ${title}...`);
-  const r=await window.nexus.installMod({serverId:s.id,downloadUrl:file.url,filename:file.filename});
-  if(r.ok){showToast('✅',`${title} installed!`);renderInstalledMods();}else showToast('❌',r.error);
+  const grid=document.getElementById('modSearchResults'); if(!grid) return;
+  const q=document.getElementById('modSearchQuery')?.value.trim()||'';
+  const sort=document.getElementById('modSort')?.value||'relevance';
+  grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Searching Modrinth…</div>';
+  try {
+    const loader = s.mcType==='quilt' ? 'quilt' : s.mcType;
+    const result=await window.nexus.searchModrinth({query:q, loader, gameVersion:s.mcVersion, sort, category:modActiveCat, limit:30});
+    if(!result.hits?.length){grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">No mods found. Try another search or category.</div>';return;}
+    grid.innerHTML=result.hits.map(modCardHtml).join('');
+  } catch(e){grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Search failed.</div>';}
 }
+
+function modCardHtml(mod){
+  const installed = modInstalledProjects.has(mod.project_id);
+  const d=mod.downloads||0; const dls = d>=1000 ? (d/1000).toFixed(d>=100000?0:1)+'k' : String(d);
+  const cats=(mod.display_categories||mod.categories||[]).slice(0,3).map(c=>`<span class="mod-card-cat">${escapeHtml(c)}</span>`).join('');
+  const jt=escapeHtml(mod.title||'').replace(/'/g,"\\'");
+  return `<div class="mod-card">
+    <div class="mod-card-top">
+      <div class="mod-card-icon">${mod.icon_url?`<img src="${escapeHtml(mod.icon_url)}" alt="" onerror="this.parentNode.textContent='📦'">`:'📦'}</div>
+      <div class="mod-card-head">
+        <div class="mod-card-title" title="${escapeHtml(mod.title||'')}">${escapeHtml(mod.title||'')}</div>
+        <div class="mod-card-author">by ${escapeHtml(mod.author||'?')}</div>
+      </div>
+    </div>
+    <div class="mod-card-desc">${escapeHtml((mod.description||'').slice(0,110))}</div>
+    <div class="mod-card-cats">${cats}</div>
+    <div class="mod-card-foot">
+      <span class="mod-card-dls">⬇ ${dls}</span>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="installModFromSearch('${mod.project_id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
+    </div>
+  </div>`;
+}
+
+async function installModFromSearch(projectId,title,btn){
+  const s=getActive(); if(!s) return;
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  const reset=()=>{ if(btn){ btn.disabled=false; btn.textContent='Install'; } };
+  try {
+    const result=await window.nexus.getModrinthVersions({projectId,gameVersion:s.mcVersion,loader:(s.mcType==='quilt'?'quilt':s.mcType)});
+    if(!result.versions?.length){showToast('❌',`No ${s.mcType} ${s.mcVersion} build for ${title}`);return reset();}
+    const file=result.versions[0].files?.find(f=>f.primary)||result.versions[0].files?.[0];
+    if(!file){showToast('❌','No download file found');return reset();}
+    const r=await window.nexus.installMod({serverId:s.id,downloadUrl:file.url,filename:file.filename,projectId});
+    if(r.ok){
+      showToast('✅',`${title} installed`);
+      modInstalledProjects.add(projectId);
+      if(btn){ btn.classList.add('installed'); btn.textContent='✓ Installed'; btn.disabled=true; }
+      renderInstalledMods();
+    } else { showToast('❌',r.error||'Install failed'); reset(); }
+  } catch(e){ showToast('❌',e.message); reset(); }
+}
+
 async function deleteMod(modPath){
-  const s=getActive(); if(!s||!confirm('Delete this mod?')) return;
-  await window.nexus.deleteMod(s.id,modPath); showToast('🗑️','Mod deleted'); renderInstalledMods();
+  const s=getActive(); if(!s||!confirm('Remove this mod?')) return;
+  await window.nexus.deleteMod(s.id,modPath);
+  showToast('🗑️','Mod removed');
+  await refreshInstalledProjects();
+  renderInstalledMods();
+  const grid=document.getElementById('modSearchResults');
+  if(grid && grid.querySelector('.mod-card')) searchMods(); // refresh install badges
 }
 
 // ── Workshop Modal (Arma 3) ───────────────────────────────────────────────────

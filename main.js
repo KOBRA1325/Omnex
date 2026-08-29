@@ -2886,16 +2886,21 @@ ipcMain.handle('open-server-folder', (e, id) => {
 });
 
 // ── Mod / Plugin manager ──────────────────────────────────────────────────────
-ipcMain.handle('search-modrinth', async (e, { query, loader, gameVersion }) => {
+// Where a Minecraft server keeps its add-ons: Paper uses plugins/, everything else mods/.
+function modsDirFor(server) {
+  return path.join(server.installDir, server.mcType === 'paper' ? 'plugins' : 'mods');
+}
+ipcMain.handle('search-modrinth', async (e, { query, loader, gameVersion, sort, category, limit }) => {
   try {
+    const facets = [[`project_type:mod`]];
+    if (loader)      facets.push([`categories:${loader}`]);
+    if (gameVersion) facets.push([`versions:${gameVersion}`]);
+    if (category)    facets.push([`categories:${category}`]);
     const params = new URLSearchParams({
-      query,
-      limit: '20',
-      facets: JSON.stringify([
-        [`project_type:mod`],
-        loader     ? [`categories:${loader}`]    : [],
-        gameVersion? [`versions:${gameVersion}`] : [],
-      ].filter(f => f.length)),
+      query: query || '',
+      limit: String(limit || 30),
+      index: ['relevance', 'downloads', 'updated', 'newest', 'follows'].includes(sort) ? sort : 'relevance',
+      facets: JSON.stringify(facets),
     });
     const data = await fetchJSON(`https://api.modrinth.com/v2/search?${params}`);
     return { ok: true, hits: data.hits || [] };
@@ -2912,12 +2917,11 @@ ipcMain.handle('get-modrinth-versions', async (e, { projectId, gameVersion, load
   } catch(e) { return { ok: false, versions: [] }; }
 });
 
-ipcMain.handle('install-mod', async (e, { serverId, downloadUrl, filename }) => {
+ipcMain.handle('install-mod', async (e, { serverId, downloadUrl, filename, projectId }) => {
   const server = appData.servers.find(s => s.id === serverId);
   if (!server?.installDir) return { ok: false, error: 'Server not found' };
 
-  // Determine mods folder
-  const modsDir = path.join(server.installDir, 'mods');
+  const modsDir = modsDirFor(server); // mods/ (or plugins/ for Paper)
   fs.mkdirSync(modsDir, { recursive: true });
 
   const destPath = path.join(modsDir, filename);
@@ -2927,6 +2931,9 @@ ipcMain.handle('install-mod', async (e, { serverId, downloadUrl, filename }) => 
     await downloadFile(downloadUrl, destPath, pct => {
       emit('console-progress', { serverId, text: `Downloading ${filename}... ${pct}%` });
     });
+    // Remember which Modrinth project this file came from, so the browser can show
+    // an "Installed" badge and we can untrack it on delete.
+    if (projectId) { server.modProjects = server.modProjects || {}; server.modProjects[projectId] = filename; saveData(); }
     log(serverId, 'success', `✔ Mod installed: ${filename}`);
     return { ok: true };
   } catch(err) {
@@ -2937,11 +2944,11 @@ ipcMain.handle('install-mod', async (e, { serverId, downloadUrl, filename }) => 
 ipcMain.handle('get-installed-mods', (e, id) => {
   const server = appData.servers.find(s => s.id === id);
   if (!server?.installDir) return [];
-  const modsDir = path.join(server.installDir, 'mods');
+  const modsDir = modsDirFor(server);
   if (!fs.existsSync(modsDir)) return [];
   try {
     return fs.readdirSync(modsDir, { withFileTypes: true })
-      .filter(e => e.isFile() && e.name.endsWith('.jar'))
+      .filter(e => e.isFile() && /\.jar$/i.test(e.name))
       .map(e => {
         const full = path.join(modsDir, e.name);
         return { name: e.name, size: fs.statSync(full).size, path: full };
@@ -2949,9 +2956,22 @@ ipcMain.handle('get-installed-mods', (e, id) => {
   } catch(e) { return []; }
 });
 
+// The set of Modrinth project IDs currently installed on a server (for "Installed" badges).
+ipcMain.handle('get-mod-projects', (e, id) => {
+  const server = appData.servers.find(s => s.id === id);
+  return server && server.modProjects ? Object.keys(server.modProjects) : [];
+});
+
 ipcMain.handle('delete-mod', (e, { serverId, modPath }) => {
-  try { fs.unlinkSync(modPath); return { ok: true }; }
+  try { fs.unlinkSync(modPath); }
   catch(e) { return { ok: false, error: e.message }; }
+  const server = appData.servers.find(s => s.id === serverId);
+  if (server && server.modProjects) {
+    const base = path.basename(modPath);
+    for (const [pid, fn] of Object.entries(server.modProjects)) if (fn === base) delete server.modProjects[pid];
+    saveData();
+  }
+  return { ok: true };
 });
 
 

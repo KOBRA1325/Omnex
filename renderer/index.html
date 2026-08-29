@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com data:; frame-src 'self' http: https:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -580,30 +580,35 @@
 
 <!-- MOD MANAGER MODAL -->
 <div class="modal-overlay" id="modModal">
-  <div class="modal modal-wide modal-tall">
+  <div class="modal modal-tall" style="width:min(900px, 95vw)">
     <div class="modal-title" style="justify-content:space-between">
-      <span>🧩 &nbsp;Mod Manager · <span id="modModalTitle"></span></span>
+      <span>🧩 &nbsp;Mods · <span id="modModalTitle"></span></span>
       <button class="btn-modal-cancel" onclick="closeModModal()">✕ Close</button>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; height:100%; min-height:0">
-      <!-- Installed -->
-      <div style="display:flex; flex-direction:column; gap:8px; min-height:0">
-        <div class="config-group-label" style="margin:0">📦 Installed Mods</div>
-        <div class="mod-installed-list" id="installedModList">
-          <div class="empty-msg-sm">Loading...</div>
-        </div>
+    <!-- Toolbar: search + sort -->
+    <div class="mod-toolbar">
+      <input class="form-input" id="modSearchQuery" placeholder="Search Modrinth…"
+        onkeydown="if(event.key==='Enter') searchMods()" style="flex:1; pointer-events:all" />
+      <select class="config-input" id="modSort" onchange="searchMods()" style="pointer-events:all; width:160px">
+        <option value="relevance">Relevance</option>
+        <option value="downloads">Most downloaded</option>
+        <option value="updated">Recently updated</option>
+        <option value="newest">Newest</option>
+        <option value="follows">Most followed</option>
+      </select>
+      <button class="btn-modal-save" onclick="searchMods()">Search</button>
+    </div>
+    <!-- Category chips -->
+    <div class="mod-cats" id="modCats"></div>
+    <!-- Content: browse grid + installed sidebar -->
+    <div class="mod-body">
+      <div class="mod-grid" id="modSearchResults">
+        <div class="empty-msg-sm" style="padding:20px">Search Modrinth, or pick a category to browse.</div>
       </div>
-      <!-- Browse -->
-      <div style="display:flex; flex-direction:column; gap:8px; min-height:0">
-        <div class="config-group-label" style="margin:0">🔍 Browse Modrinth</div>
-        <div style="display:flex; gap:6px">
-          <input class="form-input" id="modSearchQuery" placeholder="Search mods..."
-            onkeydown="if(event.key==='Enter') searchMods()"
-            style="flex:1; font-size:11px; padding:6px 10px;pointer-events:all" />
-          <button class="btn-modal-save" style="padding:6px 14px; font-size:11px" onclick="searchMods()">Search</button>
-        </div>
-        <div class="mod-search-results" id="modSearchResults">
-          <div class="empty-msg-sm">Search for mods above</div>
+      <div class="mod-installed-col">
+        <div class="config-group-label" style="margin:0">📦 Installed <span id="installedModCount" style="color:var(--text-dim); font-weight:400"></span></div>
+        <div class="mod-installed-list" id="installedModList">
+          <div class="empty-msg-sm">Loading…</div>
         </div>
       </div>
     </div>
