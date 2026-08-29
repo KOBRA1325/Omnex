@@ -978,6 +978,7 @@ function renderHeader() {
     ['btnStart','btnStop','btnRestart','btnUpdate','btnSchedule','btnBackup','btnMore','btnRemove'].forEach(id => {
       const el = document.getElementById(id); if(el) el.disabled = true;
     });
+    const bm=document.getElementById('btnMods'); if(bm) bm.style.display='none';
     updateConsoleBadge();
     return;
   }
@@ -1016,7 +1017,11 @@ function renderHeader() {
   if(btnBackup)  btnBackup.disabled  = isBusy;
   if(btnMore)    btnMore.disabled    = false;
   if(btnLogs)    btnLogs.disabled    = false;
-  if(btnMods)    btnMods.disabled    = !['paper','fabric','forge'].includes(s.mcType);
+  if(btnMods) {
+    const moddable = s.game==='Minecraft' && ['paper','fabric','forge','quilt'].includes(s.mcType);
+    btnMods.style.display = moddable ? '' : 'none';
+    btnMods.disabled = !moddable || isBusy;
+  }
   if(btnWS) btnWS.style.display = 'none';
   if(btnRemove) btnRemove.disabled = isBusy;
   updateConsoleBadge();
