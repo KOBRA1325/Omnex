@@ -5393,6 +5393,13 @@ function runScheduledShutdown(serverId, action, warnMinutes, backupBeforeRestart
   if (pendingShutdowns.has(serverId)) return;
   const server = appData.servers.find(s => s.id === serverId);
   if (!server) return;
+  // A scheduled restart/stop only applies to a RUNNING server. If it's already off,
+  // do nothing — never boot up a server the user deliberately left stopped. (Use a
+  // "start" schedule if you want it to come online at a time.)
+  if (!serverProcesses[serverId]) {
+    log(serverId, 'dim', `[Scheduler] ${action} skipped — ${server.name} is not running.`);
+    return;
+  }
   const verb = action === 'restart' ? 'restart' : 'shut down';
 
   const doAction = async () => {
