@@ -3191,7 +3191,7 @@ function forwardActivityToDiscord(serverId, kind, text, player) {
 }
 
 // Discord embed colors per event type.
-const NOTIFY_COLORS = { crash: 0xED4245, start: 0x57F287, stop: 0x99AAB5, backup: 0x5865F2, playerJoin: 0x57F287, playerLeave: 0xFAA61A };
+const NOTIFY_COLORS = { crash: 0xED4245, start: 0x57F287, stop: 0xED4245, backup: 0x5865F2, playerJoin: 0x57F287, playerLeave: 0xFAA61A };
 
 // Resolve which Discord webhook a server posts to: its own per-server override if
 // set, otherwise the global default. This is what makes multi-server setups work —
