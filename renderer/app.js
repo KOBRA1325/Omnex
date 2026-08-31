@@ -150,6 +150,21 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// Click the dark backdrop (outside the modal) to close it. Only closes when the
+// press AND release both land on the overlay itself — so a text-selection drag that
+// ends on the backdrop won't accidentally dismiss the modal.
+let _overlayMouseDown = null;
+document.addEventListener('mousedown', e => {
+  _overlayMouseDown = (e.target.classList && e.target.classList.contains('modal-overlay')) ? e.target : null;
+});
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.classList && t.classList.contains('modal-overlay') && t.classList.contains('open') && _overlayMouseDown === t) {
+    t.style.display = 'none'; t.classList.remove('open');
+  }
+  _overlayMouseDown = null;
+});
+
 // ── Games list ────────────────────────────────────────────────────────────────
 const GAMES = [
   { name:'Minecraft',       port:'25565', icon:'', fallback:'⛏️' },
