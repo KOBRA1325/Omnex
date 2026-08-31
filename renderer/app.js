@@ -2332,18 +2332,16 @@ async function installModFromSearch(projectId,title,btn){
   if(btn){ btn.disabled=true; btn.textContent='…'; }
   const reset=()=>{ if(btn){ btn.disabled=false; btn.textContent='Install'; } };
   try {
-    const result=await window.nexus.getModrinthVersions({projectId,gameVersion:s.mcVersion,loader:(s.mcType==='quilt'?'quilt':s.mcType)});
-    if(!result.versions?.length){showToast('❌',`No ${s.mcType} ${s.mcVersion} build for ${title}`);return reset();}
-    const file=result.versions[0].files?.find(f=>f.primary)||result.versions[0].files?.[0];
-    if(!file){showToast('❌','No download file found');return reset();}
-    const r=await window.nexus.installMod({serverId:s.id,downloadUrl:file.url,filename:file.filename,projectId});
+    const r=await window.nexus.installModWithDeps({serverId:s.id, projectId});
     if(r.ok){
-      showToast('✅',`${title} installed`);
+      const depN=(r.deps||[]).filter(x=>/\.jar$/i.test(x)).length;
+      showToast('✅', depN ? `${title} + ${depN} dependenc${depN===1?'y':'ies'} installed` : `${title} installed`);
       modInstalledProjects.add(projectId);
       if(btn){ btn.classList.add('installed'); btn.textContent='✓ Installed'; btn.disabled=true; }
+      await refreshInstalledProjects(); // dependency mods now show "Installed" too
       renderInstalledMods();
-    } else { showToast('❌',r.error||'Install failed'); reset(); }
-  } catch(e){ showToast('❌',e.message); reset(); }
+    } else { showToast('❌', r.error||'Install failed'); reset(); }
+  } catch(e){ showToast('❌', e.message); reset(); }
 }
 
 async function deleteMod(modPath){

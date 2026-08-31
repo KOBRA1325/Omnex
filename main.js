@@ -2995,6 +2995,54 @@ ipcMain.handle('get-mod-projects', (e, id) => {
   return server && server.modProjects ? Object.keys(server.modProjects) : [];
 });
 
+// Resolve the newest compatible Modrinth version for a project on this server.
+async function resolveModVersion(projectId, gameVersion, loader) {
+  const params = new URLSearchParams();
+  if (gameVersion) params.set('game_versions', JSON.stringify([gameVersion]));
+  if (loader)      params.set('loaders',       JSON.stringify([loader]));
+  const versions = await fetchJSON(`https://api.modrinth.com/v2/project/${projectId}/version?${params}`);
+  return (Array.isArray(versions) && versions[0]) || null; // API returns newest-first
+}
+// Download one resolved version's primary file into the server + record it.
+async function installResolvedMod(server, version, projectId) {
+  const file = (version.files || []).find(f => f.primary) || (version.files || [])[0];
+  if (!file) throw new Error('no downloadable file');
+  const modsDir = modsDirFor(server);
+  fs.mkdirSync(modsDir, { recursive: true });
+  await downloadFile(file.url, path.join(modsDir, file.filename), pct =>
+    emit('console-progress', { serverId: server.id, text: `Downloading ${file.filename}... ${pct}%` }));
+  server.modProjects = server.modProjects || {}; server.modProjects[projectId] = file.filename;
+  server.modVersions = server.modVersions || {}; server.modVersions[projectId] = version.id; // for future update checks
+  saveData();
+  log(server.id, 'success', `✔ Mod installed: ${file.filename}`);
+  return file.filename;
+}
+// Install a mod AND its required dependencies (e.g. Fabric API), depth-capped + cycle-safe.
+ipcMain.handle('install-mod-with-deps', async (e, { serverId, projectId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const loader = server.mcType === 'quilt' ? 'quilt' : server.mcType;
+  const gv = server.mcVersion;
+  const installed = [], deps = [], visited = new Set();
+  async function inst(pid, depth, isDep) {
+    if (visited.has(pid) || depth > 5) return;
+    visited.add(pid);
+    if (server.modProjects && server.modProjects[pid]) return; // already installed → assume its deps are too
+    let v; try { v = await resolveModVersion(pid, gv, loader); } catch (err) { return; }
+    if (!v) { if (isDep) deps.push(`(no ${loader} ${gv} build for a dependency)`); return; }
+    let fn; try { fn = await installResolvedMod(server, v, pid); } catch (err) { return; }
+    (isDep ? deps : installed).push(fn);
+    for (const d of (v.dependencies || [])) {
+      if (d.dependency_type === 'required' && d.project_id) await inst(d.project_id, depth + 1, true);
+    }
+  }
+  try {
+    await inst(projectId, 0, false);
+    if (!installed.length && !deps.length) return { ok: false, error: `No compatible build for ${loader} ${gv}` };
+    return { ok: true, installed, deps };
+  } catch (err) { return { ok: false, error: err.message, installed, deps }; }
+});
+
 ipcMain.handle('delete-mod', (e, { serverId, modPath }) => {
   try { fs.unlinkSync(modPath); }
   catch(e) { return { ok: false, error: e.message }; }

@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('nexus', {
   getPlayerStats:        (id)     => ipcRenderer.invoke('get-player-stats', id),
   clearPlayerStats:      (id)     => ipcRenderer.invoke('clear-player-stats', id),
   getModProjects:        (id)     => ipcRenderer.invoke('get-mod-projects', id),
+  installModWithDeps:    (opts)   => ipcRenderer.invoke('install-mod-with-deps', opts),
   detectMcLoader:        (id)     => ipcRenderer.invoke('detect-mc-loader', id),
   deleteMod:             (serverId, modPath) => ipcRenderer.invoke('delete-mod', { serverId, modPath }),
 
