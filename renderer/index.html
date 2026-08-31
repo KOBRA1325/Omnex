@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com data:; frame-src 'self' http: https:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' file: https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -46,7 +46,7 @@
 <div class="welcome-overlay" id="welcomeView" style="display:none">
   <div class="welcome-inner">
     <div class="welcome-logo">
-      <div class="welcome-logo-icon">🎮</div>
+      <img class="welcome-logo-img" src="../assets/icon.png" alt="Omnex" />
       <div class="welcome-logo-text">OMN<span>EX</span></div>
     </div>
     <div class="welcome-tagline">Free game server manager — full control, zero limits</div>

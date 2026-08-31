@@ -365,6 +365,7 @@ function createWindow() {
     minimizable: true,
     fullscreenable: true,
     backgroundColor: '#0a0c10',
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
     webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(__dirname,'preload.js') },
   });
   // Enable double-click-to-maximize on frameless windows (macOS-like behavior on Windows)
