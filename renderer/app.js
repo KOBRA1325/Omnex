@@ -2426,6 +2426,49 @@ function mdToHtml(md){
   return s;
 }
 
+// ── Player history / regulars ─────────────────────────────────────────────────
+function fmtPlaytime(ms){
+  const m=Math.floor((ms||0)/60000); if(m<60) return m+'m';
+  const h=Math.floor(m/60); if(h<24) return `${h}h ${m%60}m`;
+  const d=Math.floor(h/24); return `${d}d ${h%24}h`;
+}
+function fmtAgo(ts){
+  if(!ts) return '—'; const s=Math.floor((Date.now()-ts)/1000);
+  if(s<60) return 'just now'; const m=Math.floor(s/60); if(m<60) return m+'m ago';
+  const h=Math.floor(m/60); if(h<24) return h+'h ago'; const d=Math.floor(h/24);
+  if(d<30) return d+'d ago'; return new Date(ts).toLocaleDateString();
+}
+async function openPlayerHistory(){
+  const s=getActive(); if(!s){ showToast('⚠️','Select a server first'); return; }
+  const nm=document.getElementById('phServerName'); if(nm) nm.textContent=s.name;
+  showModal('playerHistoryModal');
+  renderPlayerHistory();
+}
+function closePlayerHistory(){ hideModal('playerHistoryModal'); }
+async function clearPlayerHistory(){
+  const s=getActive(); if(!s||!confirm('Clear all player history for this server? This can\'t be undone.')) return;
+  try{ await window.nexus.clearPlayerStats(s.id); }catch(e){}
+  renderPlayerHistory();
+}
+async function renderPlayerHistory(){
+  const s=getActive(); if(!s) return;
+  const list=document.getElementById('phList'); if(!list) return;
+  let rows=[]; try{ rows=await window.nexus.getPlayerStats(s.id); }catch(e){}
+  if(!rows||!rows.length){ list.innerHTML='<div class="empty-msg-sm" style="padding:20px">No player history yet — it builds up as people join and play.</div>'; return; }
+  const isMc=s.game==='Minecraft';
+  list.innerHTML=rows.map((p,i)=>`<div class="ph-row">
+    <span class="ph-col-rank">${i+1}</span>
+    <span class="ph-col-name">
+      ${isMc?`<img class="ph-avatar" src="https://mc-heads.net/avatar/${encodeURIComponent(p.name)}/22" onerror="this.style.display='none'">`:''}
+      <span class="ph-name">${escapeHtml(p.name)}</span>
+      ${p.online?'<span class="ph-online">● online</span>':''}
+    </span>
+    <span class="ph-col-time">${fmtPlaytime(p.totalMs)}</span>
+    <span class="ph-col-sess">${p.sessions}</span>
+    <span class="ph-col-seen">${p.online?'now':fmtAgo(p.last)}</span>
+  </div>`).join('');
+}
+
 // ── Workshop Modal (Arma 3) ───────────────────────────────────────────────────
 async function openWorkshopModal(){
   const s=getActive();
@@ -3043,7 +3086,7 @@ function wireTitlebarButtons() {
 
 // ── Move modals to body root (prevents overflow:hidden clipping) ──────────────
 function moveModalsToBody() {
-  const modalIds = ['schedModal','addModal','storageModal','logModal','modModal','settingsModal','workshopModal','configModal'];
+  const modalIds = ['schedModal','addModal','storageModal','logModal','modModal','settingsModal','workshopModal','configModal','playerHistoryModal'];
   modalIds.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;

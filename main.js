@@ -5101,6 +5101,7 @@ async function startServerById(id) {
       // Clear player list + persisted PID on stop
       const stoppedSrv = appData.servers.find(s => s.id === id);
       if (stoppedSrv) { stoppedSrv.players = []; stoppedSrv.pid = null; stoppedSrv.startedAt = null; saveData(); }
+      trackPlayers(id, []); // close out any open sessions when the server stops
       emit('players-updated', { serverId: id, players: [] });
       emit('server-stopped', { serverId:id, code });
       stopLogTailer(id);
@@ -5493,6 +5494,7 @@ async function pollPalworldPlayers(s) {
     }).filter(p => p.name && p.name.toLowerCase() !== 'name');
     s.players = players;
     checkPlayerDrop(s.id, players.length);
+    trackPlayers(s.id, players.map(p => p.name));
     emit('players-updated', { serverId: s.id, players });
   } finally {
     _playerPollInFlight.delete(s.id);
@@ -5533,6 +5535,55 @@ function classifyLine(t) {
 // Minecraft players are stored as objects { name, joinedAt, health } so the UI
 // can show session time + live health. Tolerates legacy plain-string entries.
 const mcPlayerName = p => (typeof p === 'string' ? p : (p && p.name) || '');
+
+// ── Player history / "regulars" ───────────────────────────────────────────────
+// Persistent per-server playtime + session tracking, derived by diffing the live
+// player list against who was online a moment ago. Works for any game that fills
+// server.players (Minecraft via join/leave lines, Palworld via RCON).
+const PLAYER_STATS_FILE = path.join(USER_DATA, 'player-stats.json');
+let playerStats = {}; // { [serverId]: { [name]: { first, last, totalMs, sessions } } }
+try { if (fs.existsSync(PLAYER_STATS_FILE)) playerStats = JSON.parse(fs.readFileSync(PLAYER_STATS_FILE, 'utf8')) || {}; } catch(e) { playerStats = {}; }
+let _savePlayerStatsTimer = null;
+function savePlayerStats() {
+  clearTimeout(_savePlayerStatsTimer);
+  _savePlayerStatsTimer = setTimeout(() => { try { fs.writeFileSync(PLAYER_STATS_FILE, JSON.stringify(playerStats)); } catch(e){} }, 1000);
+}
+const _onlineNames = {};   // serverId -> Set(name) currently online
+const _sessionStart = {};  // serverId -> { name: ts }
+function trackPlayers(serverId, names) {
+  if (!serverId) return;
+  const cur = new Set((names || []).filter(Boolean));
+  const prev = _onlineNames[serverId] || new Set();
+  const store = playerStats[serverId] || (playerStats[serverId] = {});
+  const starts = _sessionStart[serverId] || (_sessionStart[serverId] = {});
+  const now = Date.now();
+  let changed = false;
+  for (const n of cur) if (!prev.has(n)) {           // joined
+    const st = store[n] || (store[n] = { first: now, last: now, totalMs: 0, sessions: 0 });
+    if (!st.first) st.first = now;
+    st.sessions = (st.sessions || 0) + 1; st.last = now;
+    starts[n] = now; changed = true;
+  }
+  for (const n of prev) if (!cur.has(n)) {           // left
+    const st = store[n];
+    if (st && starts[n]) { st.totalMs = (st.totalMs || 0) + (now - starts[n]); st.last = now; }
+    delete starts[n]; changed = true;
+  }
+  _onlineNames[serverId] = cur;
+  if (changed) savePlayerStats();
+}
+function getPlayerStatsList(serverId) {
+  const store = playerStats[serverId] || {};
+  const online = _onlineNames[serverId] || new Set();
+  const starts = _sessionStart[serverId] || {};
+  const now = Date.now();
+  return Object.entries(store).map(([name, st]) => {
+    const live = online.has(name) && starts[name] ? (now - starts[name]) : 0;
+    return { name, first: st.first, last: st.last, sessions: st.sessions || 0, totalMs: (st.totalMs || 0) + live, online: online.has(name) };
+  }).sort((a, b) => b.totalMs - a.totalMs);
+}
+ipcMain.handle('get-player-stats', (e, id) => getPlayerStatsList(id));
+ipcMain.handle('clear-player-stats', (e, id) => { delete playerStats[id]; savePlayerStats(); return true; });
 
 // ── Activity feed ────────────────────────────────────────────────────────────
 // A live, human-readable feed of server happenings (joins, leaves, deaths,
@@ -5586,6 +5637,7 @@ function parsePlayerEvent(serverId, line) {
       });
       recordActivity(serverId, 'join', `${name} joined the game`, name);
     }
+    trackPlayers(serverId, server.players.map(mcPlayerName));
     emit('players-updated', { serverId, players: server.players });
     return;
   }
@@ -5606,6 +5658,7 @@ function parsePlayerEvent(serverId, line) {
       });
       recordActivity(serverId, 'leave', `${name} left the game`, name);
     }
+    trackPlayers(serverId, server.players.map(mcPlayerName));
     emit('players-updated', { serverId, players: server.players });
     return;
   }
@@ -5618,6 +5671,7 @@ function parsePlayerEvent(serverId, line) {
       const existing = server.players.find(p => mcPlayerName(p) === nm);
       return (existing && typeof existing === 'object') ? existing : { name: nm, joinedAt: Date.now(), health: null };
     });
+    trackPlayers(serverId, server.players.map(mcPlayerName));
     emit('players-updated', { serverId, players: server.players });
     return;
   }
@@ -5647,7 +5701,8 @@ function parseMinecraftEntityData(serverId, line) {
       if (!server.mapPositions) server.mapPositions = {};
       server.mapPositions[name] = { x: p.x, z: p.z, ts: Date.now() };
       saveData();
-      emit('players-updated', { serverId, players: server.players });
+      trackPlayers(serverId, server.players.map(mcPlayerName));
+    emit('players-updated', { serverId, players: server.players });
     } else {
       const hp = val.match(/^(-?[\d.]+)f?$/);
       if (hp) { p.health = Math.round(parseFloat(hp[1]) * 10) / 10; emit('players-updated', { serverId, players: server.players }); }

@@ -286,6 +286,7 @@
               <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px; padding:0 2px;">
                 <span style="font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px;">👥 Players</span>
                 <span id="playerCount" style="font-family:'Share Tech Mono',monospace; font-size:10px; color:var(--text-dim)"></span>
+                <button onclick="openPlayerHistory()" title="Player history & regulars" style="margin-left:auto; background:transparent; border:1px solid var(--border); color:var(--text-dim); font-size:9px; padding:2px 7px; border-radius:4px; cursor:pointer; pointer-events:all; text-transform:uppercase; letter-spacing:0.5px">📊 Regulars</button>
               </div>
               <div class="player-list" id="playerList">
                 <div class="empty-msg-sm" style="padding:8px 0">No players online</div>
@@ -958,6 +959,29 @@
       <div style="font-size:10px; color:var(--text-dim); font-family:'Share Tech Mono',monospace" id="settingsVersion"></div>
       <button class="btn-modal-cancel" onclick="resetWelcomeScreen()" title="Show the welcome screen on next launch">Show Welcome Again</button>
       <button class="btn-modal-cancel" onclick="closeSettingsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PLAYER HISTORY / REGULARS -->
+<div class="modal-overlay" id="playerHistoryModal">
+  <div class="modal modal-tall" style="width:min(680px, 95vw)">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>📊 &nbsp;Player History · <span id="phServerName"></span></span>
+      <div style="display:flex; gap:6px; align-items:center">
+        <button class="btn-modal-cancel" onclick="clearPlayerHistory()" title="Clear this server's history">Clear</button>
+        <button class="btn-modal-cancel" onclick="closePlayerHistory()">✕ Close</button>
+      </div>
+    </div>
+    <div class="ph-head">
+      <span class="ph-col-rank">#</span>
+      <span class="ph-col-name">Player</span>
+      <span class="ph-col-time">Playtime</span>
+      <span class="ph-col-sess">Sessions</span>
+      <span class="ph-col-seen">Last seen</span>
+    </div>
+    <div class="ph-list" id="phList">
+      <div class="empty-msg-sm" style="padding:20px">Loading…</div>
     </div>
   </div>
 </div>
