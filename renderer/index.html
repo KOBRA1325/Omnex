@@ -592,6 +592,10 @@
     </div>
     <!-- Toolbar: search + sort -->
     <div class="mod-toolbar" id="modToolbar">
+      <div class="mod-typetoggle">
+        <button id="modTypeMod" class="mod-type active" onclick="setModBrowseType('mod')">Mods</button>
+        <button id="modTypePack" class="mod-type" onclick="setModBrowseType('modpack')">Modpacks</button>
+      </div>
       <input class="form-input" id="modSearchQuery" placeholder="Search Modrinth…"
         oninput="onModSearchInput()" style="flex:1; pointer-events:all" />
       <select class="config-input" id="modSort" onchange="searchMods()" style="pointer-events:all; width:160px">

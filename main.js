@@ -2915,9 +2915,9 @@ ipcMain.handle('detect-mc-loader', (e, id) => {
   if (loader && s.mcType !== loader) { s.mcType = loader; saveData(); }
   return { loader: s.mcType || 'vanilla', detected: !!loader };
 });
-ipcMain.handle('search-modrinth', async (e, { query, loader, gameVersion, sort, category, limit }) => {
+ipcMain.handle('search-modrinth', async (e, { query, loader, gameVersion, sort, category, limit, projectType }) => {
   try {
-    const facets = [[`project_type:mod`]];
+    const facets = [[`project_type:${projectType === 'modpack' ? 'modpack' : 'mod'}`]];
     if (loader)      facets.push([`categories:${loader}`]);
     if (gameVersion) facets.push([`versions:${gameVersion}`]);
     if (category)    facets.push([`categories:${category}`]);
@@ -3041,6 +3041,63 @@ ipcMain.handle('install-mod-with-deps', async (e, { serverId, projectId }) => {
     if (!installed.length && !deps.length) return { ok: false, error: `No compatible build for ${loader} ${gv}` };
     return { ok: true, installed, deps };
   } catch (err) { return { ok: false, error: err.message, installed, deps }; }
+});
+
+// Install a Modrinth modpack (.mrpack) onto a server: download the pack, unzip it,
+// pull every server-side file to its path, and copy the overrides in. The version is
+// resolved for THIS server's loader+version, so it's compatible by construction.
+ipcMain.handle('install-modpack', async (e, { serverId, projectId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  if (!['paper', 'fabric', 'forge', 'quilt'].includes(server.mcType)) {
+    return { ok: false, error: 'Install modpacks onto a modded server (Fabric/Forge/Quilt/Paper).' };
+  }
+  const loader = server.mcType === 'quilt' ? 'quilt' : server.mcType;
+  const gv = server.mcVersion;
+  let version;
+  try { version = await resolveModVersion(projectId, gv, loader); } catch (err) { return { ok: false, error: err.message }; }
+  if (!version) return { ok: false, error: `No ${loader} ${gv} version of this modpack.` };
+  const file = (version.files || []).find(f => f.primary && /\.mrpack$/i.test(f.filename)) ||
+               (version.files || []).find(f => /\.mrpack$/i.test(f.filename));
+  if (!file) return { ok: false, error: 'No .mrpack file found (Omnex installs Modrinth packs).' };
+
+  const os = require('os');
+  const work = path.join(os.tmpdir(), `omnex-mrpack-${Date.now()}`);
+  const zipPath = work + '.zip';
+  try {
+    fs.mkdirSync(work, { recursive: true });
+    log(serverId, 'info', `Downloading modpack ${file.filename}...`);
+    await downloadFile(file.url, zipPath, pct => emit('console-progress', { serverId, text: `Downloading modpack... ${pct}%` }));
+    await extractZip(zipPath, work);
+    const idxPath = path.join(work, 'modrinth.index.json');
+    if (!fs.existsSync(idxPath)) throw new Error('Invalid modpack (no modrinth.index.json)');
+    const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+
+    let count = 0;
+    for (const f of (idx.files || [])) {
+      if (f.env && f.env.server === 'unsupported') continue; // skip client-only files
+      const url = (f.downloads || [])[0]; if (!url || !f.path) continue;
+      const dest = path.join(server.installDir, f.path);
+      if (!path.resolve(dest).startsWith(path.resolve(server.installDir))) continue; // path-traversal guard
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      try { await downloadFile(url, dest, () => {}); count++; emit('console-progress', { serverId, text: `Modpack: ${count} files...` }); }
+      catch (err) { log(serverId, 'warn', `Skipped ${f.path}: ${err.message}`); }
+    }
+    // Copy overrides (configs etc.) — server-overrides win over generic overrides.
+    for (const ov of ['overrides', 'server-overrides']) {
+      const src = path.join(work, ov);
+      try { if (fs.existsSync(src)) fs.cpSync(src, server.installDir, { recursive: true }); } catch (err) {}
+    }
+    if (idx.dependencies && idx.dependencies.minecraft) server.mcVersion = idx.dependencies.minecraft;
+    saveData();
+    log(serverId, 'success', `✔ Modpack installed: ${idx.name || 'pack'} (${count} mods)`);
+    return { ok: true, name: idx.name || 'Modpack', count };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    try { fs.rmSync(work, { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(zipPath, { force: true }); } catch (e) {}
+  }
 });
 
 ipcMain.handle('delete-mod', (e, { serverId, modPath }) => {

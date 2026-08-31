@@ -2237,7 +2237,36 @@ const MOD_CATEGORIES = [
   ['Storage','storage'], ['Food','food'], ['Equipment','equipment'],
 ];
 let modActiveCat = '';
+let modBrowseType = 'mod'; // 'mod' | 'modpack'
 let modInstalledProjects = new Set();
+
+function setModBrowseType(t){
+  modBrowseType = t;
+  const mb=document.getElementById('modTypeMod'), mp=document.getElementById('modTypePack');
+  if(mb) mb.classList.toggle('active', t==='mod');
+  if(mp) mp.classList.toggle('active', t==='modpack');
+  const q=document.getElementById('modSearchQuery'); if(q) q.placeholder = t==='modpack' ? 'Search modpacks…' : 'Search Modrinth…';
+  closeModDetail();
+  searchMods();
+}
+// Install either a single mod (+deps) or a whole modpack, depending on browse mode.
+function installSelected(projectId, title, btn){
+  return modBrowseType==='modpack' ? installModpack(projectId,title,btn) : installModFromSearch(projectId,title,btn);
+}
+async function installModpack(projectId,title,btn){
+  const s=getActive(); if(!s) return;
+  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){ showToast('ℹ️','Install modpacks onto a modded server (Fabric/Forge/Quilt/Paper).'); return; }
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  showToast('📦', `Installing ${title}… this can take a minute.`);
+  try {
+    const r=await window.nexus.installModpack({serverId:s.id, projectId});
+    if(r.ok){
+      showToast('✅', `${r.name} installed — ${r.count} mods`);
+      if(btn){ btn.classList.add('installed'); btn.textContent='✓ Installed'; btn.disabled=true; }
+      await refreshInstalledProjects(); renderInstalledMods();
+    } else { showToast('❌', r.error||'Install failed'); if(btn){ btn.disabled=false; btn.textContent='Install'; } }
+  } catch(e){ showToast('❌', e.message); if(btn){ btn.disabled=false; btn.textContent='Install'; } }
+}
 
 async function openModManager(){
   const s=getActive(); if(!s) return;
@@ -2250,7 +2279,10 @@ async function openModManager(){
     return;
   }
   const title=document.getElementById('modModalTitle'); if(title) title.textContent=`${s.name} · ${s.mcType} ${s.mcVersion||''}`;
-  modActiveCat=''; const q=document.getElementById('modSearchQuery'); if(q) q.value='';
+  modActiveCat=''; modBrowseType='mod';
+  const q=document.getElementById('modSearchQuery'); if(q) q.value='';
+  const mb=document.getElementById('modTypeMod'), mp=document.getElementById('modTypePack');
+  if(mb) mb.classList.add('active'); if(mp) mp.classList.remove('active');
   closeModDetail(); // always open on the browse view
   renderModCats();
   showModal('modModal');
@@ -2299,7 +2331,7 @@ async function searchMods(){
   grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Searching Modrinth…</div>';
   try {
     const loader = s.mcType==='quilt' ? 'quilt' : s.mcType;
-    const result=await window.nexus.searchModrinth({query:q, loader, gameVersion:s.mcVersion, sort, category:modActiveCat, limit:30});
+    const result=await window.nexus.searchModrinth({query:q, loader, gameVersion:s.mcVersion, sort, category:modActiveCat, limit:30, projectType:modBrowseType});
     if(!result.hits?.length){grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">No mods found. Try another search or category.</div>';return;}
     grid.innerHTML=result.hits.map(modCardHtml).join('');
   } catch(e){grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Search failed.</div>';}
@@ -2322,7 +2354,7 @@ function modCardHtml(mod){
     <div class="mod-card-cats">${cats}</div>
     <div class="mod-card-foot">
       <span class="mod-card-dls">⬇ ${dls}</span>
-      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="event.stopPropagation(); installModFromSearch('${mod.project_id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="event.stopPropagation(); installSelected('${mod.project_id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
     </div>
   </div>`;
 }
@@ -2395,7 +2427,7 @@ function modDetailHtml(p){
         <div class="mod-detail-sub">${escapeHtml(p.description||'')}</div>
         <div class="mod-card-cats" style="margin-top:7px">${cats}</div>
       </div>
-      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="installModFromSearch('${p.id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="installSelected('${p.id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
     </div>
     <div class="mod-detail-stats">
       <span>⬇ ${dls} downloads</span>${p.followers!=null?`<span>❤ ${p.followers.toLocaleString()} followers</span>`:''}${p.updated?`<span>🕓 Updated ${new Date(p.updated).toLocaleDateString()}</span>`:''}${p.license&&p.license.id?`<span>⚖ ${escapeHtml(p.license.id)}</span>`:''}
