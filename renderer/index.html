@@ -630,6 +630,15 @@
   <div class="modal modal-wide modal-settings">
     <div class="modal-title">⚙️ &nbsp;<span>Settings</span></div>
 
+    <div class="settings-tabs" id="settingsTabs">
+      <button class="settings-tab-btn active" data-cat="general"       onclick="switchSettingsTab('general')">🎛 General</button>
+      <button class="settings-tab-btn"        data-cat="notifications" onclick="switchSettingsTab('notifications')">🔔 Notifications</button>
+      <button class="settings-tab-btn"        data-cat="discord"       onclick="switchSettingsTab('discord')">💬 Discord</button>
+      <button class="settings-tab-btn"        data-cat="backups"       onclick="switchSettingsTab('backups')">💾 Backups</button>
+      <button class="settings-tab-btn"        data-cat="connections"   onclick="switchSettingsTab('connections')">🔗 Connections</button>
+      <button class="settings-tab-btn"        data-cat="about"         onclick="switchSettingsTab('about')">ℹ️ About</button>
+    </div>
+
     <div class="settings-sections">
       <div class="settings-section">
         <div class="config-group-label">🎨 Appearance</div>

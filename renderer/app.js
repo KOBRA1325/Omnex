@@ -2645,9 +2645,33 @@ async function downloadSelectedMods(){
 }
 
 // ── Settings Modal ────────────────────────────────────────────────────────────
+// Map a settings section (by its header text) to a tab category.
+function settingsCatFor(label){
+  const l=(label||'').toLowerCase();
+  if(l.includes('notification')) return 'notifications';
+  if(l.includes('discord'))      return 'discord';
+  if(l.includes('backup'))       return 'backups';
+  if(l.includes('remote')||l.includes('connection')) return 'connections';
+  if(l.includes('about'))        return 'about';
+  return 'general'; // Appearance, Console, Startup
+}
+function tagSettingsSections(){
+  document.querySelectorAll('#settingsModal .settings-section').forEach(s=>{
+    const label=(s.querySelector('.config-group-label')?.textContent||'').trim();
+    s.dataset.cat = settingsCatFor(label);
+  });
+}
+let _settingsTab = 'general';
+function switchSettingsTab(cat){
+  _settingsTab = cat;
+  document.querySelectorAll('#settingsModal .settings-tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.cat===cat));
+  document.querySelectorAll('#settingsModal .settings-section').forEach(s=>{ s.style.display = (s.dataset.cat===cat) ? '' : 'none'; });
+  const body=document.querySelector('#settingsModal .settings-sections'); if(body) body.scrollTop=0;
+}
 function openSettingsModal() {
   showModal('settingsModal');
   try { applySettingsToUI(); } catch(e) {}
+  try { tagSettingsSections(); switchSettingsTab(_settingsTab || 'general'); } catch(e) {}
   setTimeout(async () => {
     try {
       const v = await window.nexus.getAppVersion();
