@@ -3188,6 +3188,16 @@ ipcMain.handle('set-server-webhook', (e, serverId, url) => {
   return { ok: true };
 });
 
+// Per-server look: custom icon (emoji) + color tag shown in the sidebar/header.
+ipcMain.handle('set-server-appearance', (e, serverId, appearance) => {
+  const s = appData.servers.find(sv => sv.id === serverId);
+  if (!s) return { ok: false, error: 'Server not found' };
+  if (appearance && 'icon'  in appearance) s.customIcon = String(appearance.icon || '').slice(0, 8);
+  if (appearance && 'color' in appearance) s.color = String(appearance.color || '').trim();
+  saveData();
+  return { ok: true };
+});
+
 // Per-server Discord command allowlist (user IDs allowed to control just this server).
 ipcMain.handle('set-server-allowlist', (e, serverId, ids) => {
   const s = appData.servers.find(sv => sv.id === serverId);

@@ -706,9 +706,13 @@ function renderSidebar() {
     const isOnline = s.status === 'online', isCrashed = s.status === 'crashed';
     const statusClass = isOnline ? 'online' : isCrashed ? 'crashed' : '';
     const g = GAMES.find(g => g.name === s.game);
-    return `<div class="server-item ${s.id===activeId?'active':''}" onclick="selectServer('${s.id}')" oncontextmenu="showServerContextMenu(event, '${s.id}')">
+    const iconHtml = s.customIcon
+      ? `<span>${escapeHtml(s.customIcon)}</span>`
+      : (g ? (g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><span class="server-fallback" style="display:none">${g.fallback}</span>` : `<span>${g.fallback||s.game[0]}</span>`) : `<span>${s.game[0]}</span>`);
+    const colorStyle = s.color ? ` style="box-shadow: inset 3px 0 0 ${escapeHtml(s.color)}"` : '';
+    return `<div class="server-item ${s.id===activeId?'active':''}"${colorStyle} onclick="selectServer('${s.id}')" oncontextmenu="showServerContextMenu(event, '${s.id}')">
       <div class="server-item-icon">
-        ${g ? (g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><span class="server-fallback" style="display:none">${g.fallback}</span>` : `<span>${g.fallback||s.game[0]}</span>`) : `<span>${s.game[0]}</span>`}
+        ${iconHtml}
       </div>
       <div class="server-item-info">
         <div class="server-item-name">${escapeHtml(s.name)}</div>
@@ -743,6 +747,9 @@ function showServerContextMenu(event, serverId) {
       <span class="scm-icon">📄</span>Open logs folder
     </div>
     <div class="scm-divider"></div>
+    <div class="scm-item" onclick="ctxCustomizeServer('${serverId}')">
+      <span class="scm-icon">🎨</span>Customize look
+    </div>
     <div class="scm-item" onclick="ctxRenameServer('${serverId}')">
       <span class="scm-icon">✏️</span>Rename server
     </div>
@@ -768,6 +775,53 @@ function showServerContextMenu(event, serverId) {
 function hideServerContextMenu() {
   const m = document.getElementById('serverContextMenu');
   if (m) m.remove();
+}
+
+// ── Per-server appearance (custom icon + color tag) ───────────────────────────
+let _saServerId = null;
+const SA_EMOJIS = ['⛏️','🌍','⚔️','🔫','🏰','🚀','🐲','🧟','🌲','🔥','🍖','⭐'];
+const SA_COLORS = ['#00e5ff','#4c8dff','#a855f7','#ec4899','#39ff6e','#ffb02e','#ff3b5c','#ffd700'];
+function ctxCustomizeServer(id){ hideServerContextMenu(); openServerAppearance(id); }
+function openServerAppearance(id){
+  const s = servers.find(sv => sv.id === id); if (!s) return;
+  _saServerId = id;
+  const nm=document.getElementById('saServerName'); if(nm) nm.textContent = s.name;
+  const icon=document.getElementById('saIcon'); if(icon) icon.value = s.customIcon || '';
+  const sug=document.getElementById('saEmojiSuggest');
+  if(sug) sug.innerHTML = SA_EMOJIS.map(e=>`<button class="sa-emoji" onclick="saSetIcon('${e}')">${e}</button>`).join('');
+  renderSaColors();
+  showModal('serverAppearanceModal');
+}
+function closeServerAppearance(){ hideModal('serverAppearanceModal'); }
+function renderSaColors(){
+  const s = servers.find(sv => sv.id === _saServerId);
+  const cur = ((s && s.color) || '').toLowerCase();
+  const box = document.getElementById('saColors'); if(!box) return;
+  box.innerHTML =
+    `<button class="accent-swatch sa-none ${!cur?'active':''}" title="No color" onclick="saSetColor('')">✕</button>` +
+    SA_COLORS.map(c=>`<button class="accent-swatch ${c.toLowerCase()===cur?'active':''}" style="background:${c}" onclick="saSetColor('${c}')"></button>`).join('') +
+    `<input type="color" class="accent-custom" value="${/^#[0-9a-f]{6}$/i.test(cur)?cur:'#00e5ff'}" title="Custom color" oninput="saSetColor(this.value)">`;
+}
+function saSetIcon(e){ const i=document.getElementById('saIcon'); if(i) i.value=e; saApply(); }
+async function _saPersist(){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  try{ await window.nexus.setServerAppearance(s.id,{icon:s.customIcon||'',color:s.color||''}); }catch(e){}
+  renderSidebar(); if(s.id===activeId) renderHeader();
+}
+async function saApply(){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  s.customIcon=(document.getElementById('saIcon')?.value||'').trim();
+  await _saPersist();
+}
+async function saSetColor(c){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  s.color=c; renderSaColors(); await _saPersist();
+}
+async function saClear(){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  s.customIcon=''; s.color='';
+  const i=document.getElementById('saIcon'); if(i) i.value='';
+  renderSaColors(); await _saPersist();
 }
 function ctxSelectServer(id) {
   hideServerContextMenu();
@@ -1014,6 +1068,12 @@ function renderHeader() {
   const canStart = isInstalled && !isOnline && !isBusy;
   hdrName.textContent = s.name;
   hdrMeta.textContent = `${s.port}  ${s.game}${s.mcVersion?' v'+s.mcVersion:''}${s.mcType&&s.mcType!=='vanilla'?' '+s.mcType:''}`;
+  const hi = document.getElementById('hdrIcon');
+  if (hi) {
+    const g = GAMES.find(gg => gg.name === s.game);
+    hi.textContent = s.customIcon || (g && g.fallback) || '🎮';
+    hi.style.boxShadow = s.color ? `inset 3px 0 0 ${s.color}` : 'none';
+  }
   if (hdrStatus) {
     const statusLabel = (s.status||'offline').toUpperCase();
     const statusColor = isOnline ? 'var(--green)' : s.status==='crashed' ? 'var(--red)' : 'var(--text-dim)';
@@ -3185,7 +3245,7 @@ function wireTitlebarButtons() {
 
 // ── Move modals to body root (prevents overflow:hidden clipping) ──────────────
 function moveModalsToBody() {
-  const modalIds = ['schedModal','addModal','storageModal','logModal','modModal','settingsModal','workshopModal','configModal','playerHistoryModal'];
+  const modalIds = ['schedModal','addModal','storageModal','logModal','modModal','settingsModal','workshopModal','configModal','playerHistoryModal','serverAppearanceModal'];
   modalIds.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;

@@ -983,6 +983,26 @@
   </div>
 </div>
 
+<!-- SERVER APPEARANCE (customize look) -->
+<div class="modal-overlay" id="serverAppearanceModal">
+  <div class="modal" style="width:min(430px, 94vw)">
+    <div class="modal-title">🎨 &nbsp;Customize · <span id="saServerName"></span></div>
+    <div style="padding:4px 2px 2px">
+      <label class="form-label">Icon <span style="color:var(--text-dim); font-weight:400">(emoji — blank uses the game default)</span></label>
+      <div style="display:flex; gap:10px; align-items:center; margin:6px 0 18px">
+        <input type="text" id="saIcon" class="form-input" maxlength="4" placeholder="⛏️" style="width:64px; text-align:center; font-size:22px; pointer-events:all" oninput="saApply()">
+        <div class="sa-emoji-row" id="saEmojiSuggest"></div>
+      </div>
+      <label class="form-label">Color tag</label>
+      <div class="accent-swatches" id="saColors" style="margin-top:8px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="saClear()">Reset</button>
+      <button class="btn-modal-cancel" onclick="closeServerAppearance()">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- PLAYER HISTORY / REGULARS -->
 <div class="modal-overlay" id="playerHistoryModal">
   <div class="modal modal-tall" style="width:min(680px, 95vw)">
