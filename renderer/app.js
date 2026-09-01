@@ -556,10 +556,14 @@ function renderDashboard() {
     const statusLabel = isOnline ? 'ONLINE' : isCrashed ? 'CRASHED' : (s.status||'OFFLINE').toUpperCase();
     const g = GAMES.find(g => g.name === s.game);
     const players = s.players?.length || 0;
-    const bannerUrl = s.bannerImage ? fileUrl(s.bannerImage) : (g && g.icon ? g.icon : '');
+    // Banner precedence: dedicated banner image → custom icon image → game art;
+    // if there's no image at all, show the custom emoji (or game fallback) big.
+    const bannerUrl = s.bannerImage ? fileUrl(s.bannerImage)
+                    : s.iconImage   ? fileUrl(s.iconImage)
+                    : (g && g.icon) ? g.icon : '';
     const bannerInner = bannerUrl
       ? `<img src="${bannerUrl}" alt="${escapeHtml(s.game)}" onerror="this.style.display='none'">`
-      : `<span style="font-size:48px">${(g&&g.fallback)||escapeHtml(s.customIcon)||'🎮'}</span>`;
+      : `<span style="font-size:48px">${escapeHtml(s.customIcon)||(g&&g.fallback)||'🎮'}</span>`;
     return `<div class="dash-card" onclick="openServerDash('${s.id}')">
       <div class="dash-card-banner">${bannerInner}
         <div class="dash-card-banner-overlay"></div>
