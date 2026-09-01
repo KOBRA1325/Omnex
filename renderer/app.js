@@ -195,6 +195,8 @@ let workshopSelectedMods = [], workshopServerId = null;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getActive() { return servers.find(s => s.id === activeId) || null; }
 function escapeHtml(t) { return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Local file path -> file:// URL (for user-picked images), space-safe.
+function fileUrl(p) { return encodeURI('file:///' + String(p).replace(/\\/g,'/')); }
 function formatBytes(b) {
   if (b < 1024) return b+' B'; if (b < 1048576) return (b/1024).toFixed(1)+' KB';
   if (b < 1073741824) return (b/1048576).toFixed(1)+' MB'; return (b/1073741824).toFixed(2)+' GB';
@@ -554,11 +556,15 @@ function renderDashboard() {
     const statusLabel = isOnline ? 'ONLINE' : isCrashed ? 'CRASHED' : (s.status||'OFFLINE').toUpperCase();
     const g = GAMES.find(g => g.name === s.game);
     const players = s.players?.length || 0;
+    const bannerUrl = s.bannerImage ? fileUrl(s.bannerImage) : (g && g.icon ? g.icon : '');
+    const bannerInner = bannerUrl
+      ? `<img src="${bannerUrl}" alt="${escapeHtml(s.game)}" onerror="this.style.display='none'">`
+      : `<span style="font-size:48px">${(g&&g.fallback)||escapeHtml(s.customIcon)||'🎮'}</span>`;
     return `<div class="dash-card" onclick="openServerDash('${s.id}')">
-      ${g ? `<div class="dash-card-banner">${g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none'">` : `<span style="font-size:48px">${g.fallback||'🎮'}</span>`}
+      <div class="dash-card-banner">${bannerInner}
         <div class="dash-card-banner-overlay"></div>
         <div class="dash-card-banner-status"><div class="dash-status-dot" style="background:${statusColor};box-shadow:0 0 8px ${statusColor}"></div>
-        <span style="font-size:10px;color:${statusColor};font-family:'Share Tech Mono',monospace;letter-spacing:1px">${statusLabel}</span></div></div>` : ''}
+        <span style="font-size:10px;color:${statusColor};font-family:'Share Tech Mono',monospace;letter-spacing:1px">${statusLabel}</span></div></div>
       <div class="dash-card-header">
         <div class="dash-card-info">
           <div class="dash-card-name">${escapeHtml(s.name)}</div>
@@ -706,7 +712,9 @@ function renderSidebar() {
     const isOnline = s.status === 'online', isCrashed = s.status === 'crashed';
     const statusClass = isOnline ? 'online' : isCrashed ? 'crashed' : '';
     const g = GAMES.find(g => g.name === s.game);
-    const iconHtml = s.customIcon
+    const iconHtml = s.iconImage
+      ? `<img src="${fileUrl(s.iconImage)}" alt="" onerror="this.style.display='none'">`
+      : s.customIcon
       ? `<span>${escapeHtml(s.customIcon)}</span>`
       : (g ? (g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><span class="server-fallback" style="display:none">${g.fallback}</span>` : `<span>${g.fallback||s.game[0]}</span>`) : `<span>${s.game[0]}</span>`);
     const colorStyle = s.color ? ` style="box-shadow: inset 3px 0 0 ${escapeHtml(s.color)}"` : '';
@@ -790,9 +798,34 @@ function openServerAppearance(id){
   const sug=document.getElementById('saEmojiSuggest');
   if(sug) sug.innerHTML = SA_EMOJIS.map(e=>`<button class="sa-emoji" onclick="saSetIcon('${e}')">${e}</button>`).join('');
   renderSaColors();
+  saUpdateImgButtons();
   showModal('serverAppearanceModal');
 }
 function closeServerAppearance(){ hideModal('serverAppearanceModal'); }
+function saUpdateImgButtons(){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  const ci=document.getElementById('saClearIcon'); if(ci) ci.style.display=s.iconImage?'':'none';
+  const cb=document.getElementById('saClearBanner'); if(cb) cb.style.display=s.bannerImage?'':'none';
+}
+function _saRefreshViews(){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  renderSidebar(); if(s.id===activeId) renderHeader(); if(currentView==='dashboard') renderDashboard();
+  saUpdateImgButtons();
+}
+async function saPickImage(kind){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  try {
+    const r=await window.nexus.pickServerImage(s.id, kind);
+    if(r && r.ok){ if(kind==='banner') s.bannerImage=r.path; else s.iconImage=r.path; _saRefreshViews(); showToast('🖼️', kind==='banner'?'Banner image set':'Icon image set'); }
+    else if(r && r.error){ showToast('❌', r.error); }
+  } catch(e){ showToast('❌', e.message); }
+}
+async function saClearImage(kind){
+  const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
+  try{ await window.nexus.clearServerImage(s.id, kind); }catch(e){}
+  if(kind==='banner') s.bannerImage=null; else s.iconImage=null;
+  _saRefreshViews();
+}
 function renderSaColors(){
   const s = servers.find(sv => sv.id === _saServerId);
   const cur = ((s && s.color) || '').toLowerCase();
@@ -821,7 +854,10 @@ async function saClear(){
   const s=servers.find(sv=>sv.id===_saServerId); if(!s) return;
   s.customIcon=''; s.color='';
   const i=document.getElementById('saIcon'); if(i) i.value='';
+  if(s.iconImage){ try{ await window.nexus.clearServerImage(s.id,'icon'); }catch(e){} s.iconImage=null; }
+  if(s.bannerImage){ try{ await window.nexus.clearServerImage(s.id,'banner'); }catch(e){} s.bannerImage=null; }
   renderSaColors(); await _saPersist();
+  _saRefreshViews();
 }
 function ctxSelectServer(id) {
   hideServerContextMenu();
@@ -1071,7 +1107,8 @@ function renderHeader() {
   const hi = document.getElementById('hdrIcon');
   if (hi) {
     const g = GAMES.find(gg => gg.name === s.game);
-    hi.textContent = s.customIcon || (g && g.fallback) || '🎮';
+    if (s.iconImage) hi.innerHTML = `<img src="${fileUrl(s.iconImage)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">`;
+    else hi.textContent = s.customIcon || (g && g.fallback) || '🎮';
     hi.style.boxShadow = s.color ? `inset 3px 0 0 ${s.color}` : 'none';
   }
   if (hdrStatus) {

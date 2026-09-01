@@ -3198,6 +3198,41 @@ ipcMain.handle('set-server-appearance', (e, serverId, appearance) => {
   return { ok: true };
 });
 
+// Per-server custom images: let the user pick a local image; copy it into Omnex's
+// data so it persists, and store the path (kind: 'icon' small, or 'banner' large).
+const SERVER_IMAGES_DIR = path.join(USER_DATA, 'server-images');
+ipcMain.handle('pick-server-image', async (e, serverId, kind) => {
+  const s = appData.servers.find(sv => sv.id === serverId);
+  if (!s) return { ok: false, error: 'Server not found' };
+  const { dialog } = require('electron');
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: `Choose ${kind === 'banner' ? 'banner' : 'icon'} image`,
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+  });
+  if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+  try {
+    fs.mkdirSync(SERVER_IMAGES_DIR, { recursive: true });
+    const ext = (path.extname(res.filePaths[0]) || '.png').toLowerCase();
+    // clear any prior file for this server+kind (any extension)
+    try { for (const f of fs.readdirSync(SERVER_IMAGES_DIR)) if (f.startsWith(`${serverId}-${kind}.`)) fs.rmSync(path.join(SERVER_IMAGES_DIR, f), { force: true }); } catch (err) {}
+    const dest = path.join(SERVER_IMAGES_DIR, `${serverId}-${kind}${ext}`);
+    fs.copyFileSync(res.filePaths[0], dest);
+    if (kind === 'banner') s.bannerImage = dest; else s.iconImage = dest;
+    saveData();
+    return { ok: true, path: dest };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('clear-server-image', (e, serverId, kind) => {
+  const s = appData.servers.find(sv => sv.id === serverId);
+  if (!s) return { ok: false };
+  const p = kind === 'banner' ? s.bannerImage : s.iconImage;
+  if (p) { try { fs.rmSync(p, { force: true }); } catch (err) {} }
+  if (kind === 'banner') s.bannerImage = null; else s.iconImage = null;
+  saveData();
+  return { ok: true };
+});
+
 // Per-server Discord command allowlist (user IDs allowed to control just this server).
 ipcMain.handle('set-server-allowlist', (e, serverId, ids) => {
   const s = appData.servers.find(sv => sv.id === serverId);

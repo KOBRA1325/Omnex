@@ -995,9 +995,16 @@
       </div>
       <label class="form-label">Color tag</label>
       <div class="accent-swatches" id="saColors" style="margin-top:8px"></div>
+      <label class="form-label" style="display:block; margin-top:18px">Custom images <span style="color:var(--text-dim); font-weight:400">(optional — override the icon &amp; dashboard banner)</span></label>
+      <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap">
+        <button class="btn-modal-cancel" style="pointer-events:all" onclick="saPickImage('icon')">🖼 Icon image…</button>
+        <button class="btn-modal-cancel" id="saClearIcon" style="pointer-events:all; display:none" onclick="saClearImage('icon')">Clear icon</button>
+        <button class="btn-modal-cancel" style="pointer-events:all" onclick="saPickImage('banner')">🖼 Banner image…</button>
+        <button class="btn-modal-cancel" id="saClearBanner" style="pointer-events:all; display:none" onclick="saClearImage('banner')">Clear banner</button>
+      </div>
     </div>
     <div class="modal-actions">
-      <button class="btn-modal-cancel" onclick="saClear()">Reset</button>
+      <button class="btn-modal-cancel" onclick="saClear()">Reset all</button>
       <button class="btn-modal-cancel" onclick="closeServerAppearance()">Done</button>
     </div>
   </div>
