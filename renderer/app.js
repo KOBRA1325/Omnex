@@ -167,7 +167,7 @@ document.addEventListener('click', e => {
 
 // ── Games list ────────────────────────────────────────────────────────────────
 const GAMES = [
-  { name:'Minecraft',       port:'25565', icon:'', fallback:'⛏️' },
+  { name:'Minecraft',       port:'25565', icon:'../assets/minecraft.jpg', fallback:'⛏️' },
   { name:'CS2',             port:'27015', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/730/capsule_sm_120.jpg',     fallback:'🔫' },
   { name:'Valheim',         port:'2456',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/892970/capsule_sm_120.jpg',  fallback:'⚔️' },
   { name:'Rust',            port:'28015', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/252490/capsule_sm_120.jpg',  fallback:'🏕️' },
