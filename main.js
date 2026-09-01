@@ -877,18 +877,10 @@ async function runInstall(id, server, config) {
   if (!def) throw new Error('Unknown game');
 
   if (server.game === 'Terraria' && server.terrariaType === 'tmodloader') {
-    // tModLoader is a free Steam app (1281930) — installable via anonymous SteamCMD.
-    // Ships a headless launcher (start-tModLoaderServer.bat) + bundled .NET runtime.
-    await ensureSteamCmd(id);
-    await ensureVCRedist(id);
-    let launcher = '';
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (attempt > 1) log(id, 'warn', `⚠ tModLoader download didn't finish — retrying (attempt ${attempt}/3)...`);
-      await installViaSteamCmd(id, server.installDir, '1281930', 'tModLoader');
-      launcher = findExe(server.installDir, 'start-tModLoaderServer.bat');
-      if (launcher) break;
-    }
-    if (!launcher) throw new Error('start-tModLoaderServer.bat not found after install — SteamCMD did not finish downloading tModLoader.');
+    // tModLoader's Steam app (1281930) needs a licensed account — anonymous SteamCMD
+    // "succeeds" with 0 bytes. So grab the official GitHub release zip instead (no
+    // account needed), the same way vanilla Terraria uses terraria.org.
+    const launcher = await installTModLoader(id, server.installDir);
     server.execPath = launcher; // .bat — launched via shell with startArgs (see GAME_DEFS/startServerById)
     server.args     = '';
     syncServerConfig(id, server, /* isInstall */ true); // serverconfig.txt (world/port/etc.)
@@ -1526,6 +1518,34 @@ async function installTerraria(serverId, installDir, config) {
     throw new Error('TerrariaServer.exe missing after extraction');
   }
   log(serverId, 'success', '✔ Terraria Dedicated Server installed.');
+}
+
+// tModLoader dedicated server from the official GitHub release (tModLoader.zip).
+// No Steam account needed. Returns the path to start-tModLoaderServer.bat.
+async function installTModLoader(serverId, installDir) {
+  log(serverId, 'info', 'Finding the latest tModLoader release on GitHub...');
+  let assetUrl = '', tag = '';
+  try {
+    const rel = await fetchJSON('https://api.github.com/repos/tModLoader/tModLoader/releases/latest');
+    tag = rel && rel.tag_name || '';
+    const asset = (rel && rel.assets || []).find(a => a.name === 'tModLoader.zip');
+    assetUrl = asset && asset.browser_download_url;
+  } catch (e) {}
+  if (!assetUrl) throw new Error('Could not find the tModLoader.zip release asset on GitHub.');
+
+  const zipPath = path.join(installDir, 'tmodloader.zip');
+  log(serverId, 'info', `Downloading tModLoader ${tag} dedicated server...`);
+  await downloadFile(assetUrl, zipPath, pct => {
+    const filled = Math.floor(pct / 5);
+    emit('console-progress', { serverId, text: `⬇  tModLoader  [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${pct}%` });
+  });
+  log(serverId, 'info', 'Extracting tModLoader...');
+  await extractZip(zipPath, installDir);
+  try { fs.rmSync(zipPath, { force: true }); } catch (e) {}
+
+  const launcher = findExe(installDir, 'start-tModLoaderServer.bat');
+  if (!launcher) throw new Error('start-tModLoaderServer.bat not found in the tModLoader package.');
+  return launcher;
 }
 
 async function installMinecraft(serverId, installDir, config) {
