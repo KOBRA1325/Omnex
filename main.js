@@ -3139,6 +3139,7 @@ function loadSettings() {
     defaultBackupKeep:   10,
     autoStartServers:    [],
     theme:               'dark',
+    accentColor:         '#00e5ff',  // app highlight color (themable)
     consoleFont:         'Share Tech Mono',
     consoleFontSize:     12,
     appTextScale:        1,

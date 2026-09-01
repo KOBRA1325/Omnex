@@ -1117,9 +1117,11 @@ function drawChart() {
     grad.addColorStop(1,color.replace(')',',.00)').replace('rgb','rgba'));
     ctx.fillStyle=grad; ctx.fill();
   };
-  drawLine(chartData.cpu,'rgb(0,229,255)','#00e5ff');
+  const accentRgb=(getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb')||'0,229,255').trim();
+  const accentCol='rgb('+accentRgb+')';
+  drawLine(chartData.cpu,accentCol,accentCol);
   drawLine(chartData.ram,'rgb(57,255,110)','#39ff6e');
-  ctx.font='9px Share Tech Mono,monospace'; ctx.fillStyle='rgba(0,229,255,0.7)'; ctx.fillText('CPU',4,11);
+  ctx.font='9px Share Tech Mono,monospace'; ctx.fillStyle='rgba('+accentRgb+',0.7)'; ctx.fillText('CPU',4,11);
   ctx.fillStyle='rgba(57,255,110,0.7)'; ctx.fillText('RAM',30,11);
 }
 
@@ -2704,10 +2706,38 @@ function applySettingsToUI() {
   Object.entries(sels).forEach(([id,key])=>{const el=document.getElementById(id);if(el&&appSettings[key]!==undefined)el.value=String(appSettings[key]);});
   // Apply the app text scale on load
   if (appSettings.appTextScale !== undefined) applyTextScale(appSettings.appTextScale);
+  // Accent color: apply + reflect in the picker
+  if (appSettings.accentColor) applyAccent(appSettings.accentColor);
+  renderAccentSwatches();
 }
 function applyTextScale(scale) {
   const v = (scale && !isNaN(scale)) ? scale : 1;
   document.documentElement.style.setProperty('--app-text-scale', String(v));
+}
+// ── Accent color theming ──────────────────────────────────────────────────────
+const ACCENT_PRESETS = ['#00e5ff','#4c8dff','#a855f7','#ec4899','#39ff6e','#ffb02e','#ff3b5c','#ffd700'];
+function hexToRgbStr(hex){
+  const m=/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex||'').trim());
+  return m ? `${parseInt(m[1],16)}, ${parseInt(m[2],16)}, ${parseInt(m[3],16)}` : null;
+}
+function applyAccent(hex){
+  const rgb=hexToRgbStr(hex); if(!rgb) return;
+  document.documentElement.style.setProperty('--accent', hex);
+  document.documentElement.style.setProperty('--accent-rgb', rgb);
+  try { drawChart(); } catch(e) {} // recolor the live CPU/RAM chart
+}
+function renderAccentSwatches(){
+  const box=document.getElementById('accentSwatches'); if(!box) return;
+  const cur=(appSettings.accentColor||'#00e5ff').toLowerCase();
+  box.innerHTML = ACCENT_PRESETS.map(c=>
+    `<button class="accent-swatch ${c.toLowerCase()===cur?'active':''}" style="background:${c}" data-color="${c}" title="${c}" onclick="pickAccent('${c}')"></button>`
+  ).join('') + `<input type="color" id="accentCustom" class="accent-custom" value="${/^#[0-9a-f]{6}$/i.test(cur)?cur:'#00e5ff'}" title="Custom color" oninput="pickAccent(this.value)">`;
+}
+async function pickAccent(hex){
+  appSettings.accentColor=hex;
+  applyAccent(hex);
+  renderAccentSwatches();
+  try { await window.nexus.saveSettings(appSettings); } catch(e){}
 }
 async function toggleSetting(key, btn) {
   appSettings[key]=!appSettings[key]; btn.classList.toggle('on',appSettings[key]);
