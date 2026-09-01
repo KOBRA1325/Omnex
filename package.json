@@ -55,6 +55,8 @@
       "steam-auth.js",
       "renderer/**/*",
       "assets/**/*",
+      "!assets/*-source.*",
+      "!assets/Omnex Logo.png",
       "node_modules/**/*",
       "package.json",
       "LICENSE",
