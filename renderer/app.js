@@ -186,7 +186,7 @@ const GAMES = [
 let servers   = [], schedules = [], activeId = null, uptimeSec = 0;
 let statsInterval = null, uptimeInterval = null, appSettings = {}, currentView = 'dashboard';
 let __manualUpdateCheck = false, appVersionStr = '';
-let selectedGame = GAMES[0], selectedMcType = 'vanilla', addModalMode = 'install';
+let selectedGame = GAMES[0], selectedMcType = 'vanilla', selectedTerrariaType = 'vanilla', addModalMode = 'install';
 let importDetectedGame = null, currentTheme = 'dark', _cachedBundle = null;
 let MAX_CONSOLE_LINES = 500, _consoleBuf = [], _consoleRaf = null;
 const chartData = { cpu: new Array(60).fill(0), ram: new Array(60).fill(0) };
@@ -1285,7 +1285,7 @@ async function removeCurrentServer() {
 
 // ── Add Server Modal ──────────────────────────────────────────────────────────
 function openAddModal() {
-  selectedGame = GAMES[0]; selectedMcType = 'vanilla'; addModalMode = 'install';
+  selectedGame = GAMES[0]; selectedMcType = 'vanilla'; selectedTerrariaType = 'vanilla'; addModalMode = 'install';
   renderGameGrid();
   const nameInput = document.getElementById('newSrvName');
   const portInput = document.getElementById('newSrvPort');
@@ -1327,15 +1327,24 @@ function updateInstallBtn() {
   btn.style.borderColor=''; btn.style.color=''; btn.style.background='';
 }
 function updateMcVisibility() {
-  const mc = document.getElementById('mcOptions'); if(!mc) return;
-  const isMc = selectedGame.name === 'Minecraft';
-  mc.style.display = isMc ? '' : 'none';
-  if (isMc) loadMcVersions(); // populate the version dropdown when Minecraft is selected
+  const mc = document.getElementById('mcOptions'); if(mc){
+    const isMc = selectedGame.name === 'Minecraft';
+    mc.style.display = isMc ? '' : 'none';
+    if (isMc) loadMcVersions(); // populate the version dropdown when Minecraft is selected
+  }
+  const tr = document.getElementById('terrariaOptions'); if(tr){
+    tr.style.display = selectedGame.name === 'Terraria' ? '' : 'none';
+  }
 }
 function pickMcType(type) {
   selectedMcType = type;
-  document.querySelectorAll('.mc-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type===type));
+  document.querySelectorAll('#mcTypeGrid .mc-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type===type));
   loadMcVersions(); // version list differs per type (vanilla/paper/fabric)
+  updateInstallInfo();
+}
+function pickTerrariaType(type) {
+  selectedTerrariaType = type;
+  document.querySelectorAll('#terrariaTypeGrid .mc-type-btn').forEach(b => b.classList.toggle('active', b.dataset.ttype===type));
   updateInstallInfo();
 }
 function updateInstallInfo() {
@@ -1347,7 +1356,9 @@ function updateInstallInfo() {
   const info = g.importOnly
     ? `${g.name} is import-only — install its dedicated server from your own account, then use the Import tab to add it. Omnex can't download it automatically.`
     : g.name === 'Terraria'
-    ? `Omnex will download the official Terraria Dedicated Server from terraria.org and configure it automatically. No Steam account required.`
+    ? (selectedTerrariaType === 'tmodloader'
+        ? `Omnex will install the tModLoader dedicated server via SteamCMD (free, no Steam account) and configure it. Mods are added after install from the Mods panel.`
+        : `Omnex will download the official Terraria Dedicated Server from terraria.org and configure it automatically. No Steam account required.`)
     : (isSteam
       ? `Omnex will download SteamCMD and install the ${g.name} dedicated server. No Steam account required.`
       : `Omnex will download the latest ${g.name} server JAR and configure it automatically.`);
@@ -1380,7 +1391,7 @@ async function installServer() {
   closeAddModal();
   showToast('⬇️', `Installing ${name}... watch the console`);
   try {
-    const result = await window.nexus.installServer({ name, port, game: selectedGame.name, icon: selectedGame.icon, fallback: selectedGame.fallback, mcType: selectedMcType, mcVersion });
+    const result = await window.nexus.installServer({ name, port, game: selectedGame.name, icon: selectedGame.icon, fallback: selectedGame.fallback, mcType: selectedMcType, mcVersion, terrariaType: selectedTerrariaType });
     if (!result.ok) showToast('❌', result.error||'Install failed');
   } catch(err) { showToast('❌', err.message); }
   if(btn){btn.disabled=false; btn.textContent='⬇ Install Server';}

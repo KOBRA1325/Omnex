@@ -512,6 +512,21 @@
       </div>
     </div>
 
+    <!-- Terraria extra options (shown only for Terraria) -->
+    <div id="terrariaOptions" style="display:none">
+      <div class="form-row">
+        <label class="form-label">Server Type</label>
+        <div class="mc-type-grid" id="terrariaTypeGrid">
+          <div class="mc-type-btn active" data-ttype="vanilla" onclick="pickTerrariaType('vanilla')">
+            <span class="mc-type-icon">🌳</span><span>Vanilla</span><small>Official · terraria.org</small>
+          </div>
+          <div class="mc-type-btn" data-ttype="tmodloader" onclick="pickTerrariaType('tmodloader')">
+            <span class="mc-type-icon">🧩</span><span>tModLoader</span><small>Modded · Steam Workshop</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="install-info" id="installInfo">
       <div class="install-info-icon">ℹ️</div>
       <div class="install-info-text" id="installInfoText">Omnex will automatically download and install the server files for you.</div>

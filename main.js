@@ -291,7 +291,9 @@ const GAME_DEFS = {
   'Project Zomboid': { type:'steam', serverAppId:'380870', startExe:'ProjectZomboidServer.bat', startArgs:(d,s)=>['-port',String(s.port||16261)] },
   'Ark: Survival':   { type:'steam', serverAppId:'376030', startExe:'ShooterGameServer.exe',    startArgs:(d,s)=>[`TheIsland?listen?Port=${s.port||7777}?MaxPlayers=20`,'-server','-log'] },
   'V Rising':        { type:'steam', serverAppId:'1829350',startExe:'VRisingServer.exe',        startArgs:(d,s)=>['-persistentDataPath','./save-data','-serverName',s.name||'My V Rising Server','-port',String(s.port||9876)] },
-  'Terraria':        { type:'steam', serverAppId:'105600', startExe:'TerrariaServer.exe',       startArgs:(d,s)=>['-config', path.join(d,'serverconfig.txt'), '-port', String(s.port||7777)] },
+  'Terraria':        { type:'steam', serverAppId:'105600', startExe:'TerrariaServer.exe',       startArgs:(d,s)=> s.terrariaType==='tmodloader'
+                          ? ['-config', 'serverconfig.txt', '-nosteam']   // relative path = space-safe under shell; -nosteam = standalone (IP) server
+                          : ['-config', path.join(d,'serverconfig.txt'), '-port', String(s.port||7777)] },
   '7 Days to Die':   { type:'steam', serverAppId:'294420', startExe:'7DaysToDieServer.exe',     startArgs:(d,s)=>[] },
   'Palworld':        { type:'steam', serverAppId:'2394010',startExe:'PalServer-Win64-Shipping-Cmd.exe', startArgs:(d,s)=>{
     const args = ['-port='+(s.port||8211),'-publicport='+(s.port||8211),'-useperfthreads','-NoAsyncLoadingThread','-UseMultithreadForDS'];
@@ -823,7 +825,7 @@ async function createAndInstallServer(config) {
   const { dir: installDir } = uniqueInstallDir(folderBase);
   fs.mkdirSync(installDir, { recursive:true });
 
-  const server = { id, name:config.name, game:config.game, icon:config.icon, fallback:config.fallback, port:config.port, installDir, status:'installing', mcType:config.mcType, mcVersion:config.mcVersion, steamPass:config.steamPass };
+  const server = { id, name:config.name, game:config.game, icon:config.icon, fallback:config.fallback, port:config.port, installDir, status:'installing', mcType:config.mcType, mcVersion:config.mcVersion, terrariaType:config.terrariaType, steamPass:config.steamPass };
   if (config.password) server.password = config.password; // best-effort; applied by config sync where supported
   // Palworld: default to showing in community server list (users can toggle off in config)
   if (config.game === 'Palworld') server.showInPublicList = true;
@@ -874,7 +876,24 @@ async function runInstall(id, server, config) {
   const def = GAME_DEFS[server.game];
   if (!def) throw new Error('Unknown game');
 
-  if (server.game === 'Terraria') {
+  if (server.game === 'Terraria' && server.terrariaType === 'tmodloader') {
+    // tModLoader is a free Steam app (1281930) — installable via anonymous SteamCMD.
+    // Ships a headless launcher (start-tModLoaderServer.bat) + bundled .NET runtime.
+    await ensureSteamCmd(id);
+    await ensureVCRedist(id);
+    let launcher = '';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (attempt > 1) log(id, 'warn', `⚠ tModLoader download didn't finish — retrying (attempt ${attempt}/3)...`);
+      await installViaSteamCmd(id, server.installDir, '1281930', 'tModLoader');
+      launcher = findExe(server.installDir, 'start-tModLoaderServer.bat');
+      if (launcher) break;
+    }
+    if (!launcher) throw new Error('start-tModLoaderServer.bat not found after install — SteamCMD did not finish downloading tModLoader.');
+    server.execPath = launcher; // .bat — launched via shell with startArgs (see GAME_DEFS/startServerById)
+    server.args     = '';
+    syncServerConfig(id, server, /* isInstall */ true); // serverconfig.txt (world/port/etc.)
+    log(id, 'success', '✔ tModLoader dedicated server installed. Add mods from the Mods panel.');
+  } else if (server.game === 'Terraria') {
     // Fresh install from terraria.org (SteamCMD can't fetch Terraria anonymously).
     await installTerraria(id, server.installDir, config);
     server.execPath = path.join(server.installDir, 'TerrariaServer.exe');
@@ -5123,6 +5142,7 @@ async function startServerById(id) {
   } else {
     exe  = server.execPath;
     args = server.args ? server.args.split(' ').filter(Boolean) : (def?.startArgs ? def.startArgs(server.installDir, server) : []);
+    if (/\.(bat|cmd|sh)$/i.test(exe || '')) forceShell = true; // launch scripts (e.g. tModLoader) need a shell
   }
 
   // Palworld migration: PalServer.exe is a launcher that spawns a child console.
