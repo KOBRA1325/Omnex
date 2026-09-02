@@ -3306,6 +3306,56 @@ ipcMain.handle('tml-install-mod', async (e, { serverId, input }) => {
   } catch (err) { return { ok: false, error: err.message }; }
 });
 
+// Browse the tModLoader mod catalog in-app (community API — lists every Workshop mod
+// with metadata, incl. the Workshop id used to install). The full list is ~28MB, so
+// it's fetched once, cached for an hour, and filtered/sorted in the main process —
+// the renderer only ever receives a small page of results.
+let _tmlCatalog = { at: 0, list: null, loading: null };
+function tmlHttpGetText(url, timeoutMs = 45000) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'Omnex/1.0' } }, res => {
+      if ([301, 302].includes(res.statusCode)) return tmlHttpGetText(res.headers.location, timeoutMs).then(resolve, reject);
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      let data = ''; res.setEncoding('utf8'); res.on('data', d => data += d); res.on('end', () => resolve(data));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('Request timed out')));
+  });
+}
+async function tmlLoadCatalog() {
+  if (_tmlCatalog.list && Date.now() - _tmlCatalog.at < 3600e3) return _tmlCatalog.list;
+  if (_tmlCatalog.loading) return _tmlCatalog.loading;
+  _tmlCatalog.loading = (async () => {
+    const raw = await tmlHttpGetText('https://tmlapis.le0n.dev/1.4/list');
+    const arr = JSON.parse(raw);
+    const list = (Array.isArray(arr) ? arr : []).map(m => ({
+      id: String(m.mod_id || ''), name: m.internal_name || '', title: m.display_name || m.internal_name || '',
+      author: m.author || '', desc: m.description || '', icon: m.workshop_icon_url || '',
+      downloads: m.subscriptions_total || 0, side: m.modside || '', updated: m.time_updated || 0,
+      tags: (m.tags || []).map(t => (t && (t.display_name || t.tag)) || '').filter(Boolean),
+    })).filter(m => m.id && m.name);
+    _tmlCatalog = { at: Date.now(), list, loading: null };
+    return list;
+  })().catch(err => { _tmlCatalog.loading = null; throw err; });
+  return _tmlCatalog.loading;
+}
+ipcMain.handle('tml-browse-mods', async (e, { query = '', sort = 'downloads', limit = 45 } = {}) => {
+  try {
+    let list = await tmlLoadCatalog();
+    const q = String(query || '').trim().toLowerCase();
+    if (q) list = list.filter(m => m.title.toLowerCase().includes(q) || m.name.toLowerCase().includes(q) || m.author.toLowerCase().includes(q));
+    const sorters = {
+      downloads: (a, b) => b.downloads - a.downloads,
+      updated:   (a, b) => b.updated - a.updated,
+      name:      (a, b) => a.title.localeCompare(b.title),
+    };
+    const total = list.length;
+    list = [...list].sort(sorters[sort] || sorters.downloads).slice(0, limit)
+      .map(m => ({ id: m.id, name: m.name, title: m.title, author: m.author, icon: m.icon, downloads: m.downloads, side: m.side, desc: (m.desc || '').replace(/\s+/g, ' ').slice(0, 160) }));
+    return { ok: true, mods: list, total };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 const SETTINGS_FILE = path.join(USER_DATA, 'settings.json');

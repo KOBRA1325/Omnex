@@ -163,6 +163,7 @@ contextBridge.exposeInMainWorld('nexus', {
   tmlToggleMod:          (serverId, name, enabled) => ipcRenderer.invoke('tml-toggle-mod', { serverId, name, enabled }),
   tmlDeleteMod:          (serverId, name)    => ipcRenderer.invoke('tml-delete-mod', { serverId, name }),
   tmlInstallMod:         (serverId, input)   => ipcRenderer.invoke('tml-install-mod', { serverId, input }),
+  tmlBrowseMods:         (opts)              => ipcRenderer.invoke('tml-browse-mods', opts),
 
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),

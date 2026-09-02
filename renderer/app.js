@@ -2519,20 +2519,89 @@ async function deleteMod(modPath){
 }
 
 // ── tModLoader mods (Steam Workshop) ────────────────────────────────────────────
+let tmlInstalledNames = new Set(); // internal names installed on the active server (for Browse badges)
+
 function openTmlMods(){
   const s=getActive(); if(!s) return;
   const title=document.getElementById('tmlModTitle'); if(title) title.textContent=s.name;
   const inp=document.getElementById('tmlWorkshopInput'); if(inp) inp.value='';
+  const q=document.getElementById('tmlSearchQuery'); if(q) q.value='';
   showModal('tmlModModal');
-  renderTmlMods();
+  tmlSwitchTab('browse');
+  renderTmlMods();  // loads installed list + refreshes tmlInstalledNames for badges
+  tmlBrowse();      // populate the catalog
 }
 function closeTmlMods(){ hideModal('tmlModModal'); }
+
+function tmlSwitchTab(tab){
+  const b=document.getElementById('tmlBrowsePane'), i=document.getElementById('tmlInstalledPane');
+  const tb=document.getElementById('tmlTabBrowse'), ti=document.getElementById('tmlTabInstalled');
+  const browse = tab==='browse';
+  if(b) b.style.display = browse?'':'none';
+  if(i) i.style.display = browse?'none':'';
+  if(tb) tb.classList.toggle('active', browse);
+  if(ti) ti.classList.toggle('active', !browse);
+  if(!browse) renderTmlMods();
+}
+
+let _tmlSearchTimer=null;
+function onTmlSearchInput(){ clearTimeout(_tmlSearchTimer); _tmlSearchTimer=setTimeout(tmlBrowse, 300); }
+
+async function tmlBrowse(){
+  const s=getActive(); if(!s) return;
+  const grid=document.getElementById('tmlBrowseResults'); if(!grid) return;
+  const query=document.getElementById('tmlSearchQuery')?.value.trim()||'';
+  const sort=document.getElementById('tmlSort')?.value||'downloads';
+  grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Loading catalog…</div>';
+  try {
+    const r=await window.nexus.tmlBrowseMods({ query, sort, limit:45 });
+    if(!r||!r.ok){ grid.innerHTML=`<div class="empty-msg-sm" style="padding:20px">Could not load the mod catalog.${r&&r.error?'<br><span style="opacity:.7">'+escapeHtml(r.error)+'</span>':''}</div>`; return; }
+    if(!r.mods.length){ grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">No mods found. Try another search.</div>'; return; }
+    grid.innerHTML=r.mods.map(tmlModCardHtml).join('');
+  } catch(e){ grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Search failed.</div>'; }
+}
+
+function tmlModCardHtml(m){
+  const installed = tmlInstalledNames.has(m.name);
+  const d=m.downloads||0; const dls = d>=1e6 ? (d/1e6).toFixed(1)+'M' : d>=1000 ? (d/1000).toFixed(d>=1e5?0:1)+'k' : String(d);
+  const jt=escapeHtml(m.title||'').replace(/'/g,"\\'");
+  const sideTag = (m.side && m.side!=='Both' && m.side!=='Server') ? `<span class="mod-card-cat" title="This mod is client-side">${escapeHtml(m.side)}</span>` : '';
+  return `<div class="mod-card">
+    <div class="mod-card-top">
+      <div class="mod-card-icon">${m.icon?`<img src="${escapeHtml(m.icon)}" alt="" onerror="this.parentNode.textContent='📦'">`:'📦'}</div>
+      <div class="mod-card-head">
+        <div class="mod-card-title" title="${escapeHtml(m.title||'')}">${escapeHtml(m.title||'')}</div>
+        <div class="mod-card-author">by ${escapeHtml(m.author||'?')}</div>
+      </div>
+    </div>
+    <div class="mod-card-desc">${escapeHtml((m.desc||'').slice(0,110))}</div>
+    <div class="mod-card-cats">${sideTag}</div>
+    <div class="mod-card-foot">
+      <span class="mod-card-dls">⬇ ${dls}</span>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="tmlInstallFromBrowse('${m.id}','${jt}', this)">${installed?'✓ Installed':'Install'}</button>
+    </div>
+  </div>`;
+}
+
+async function tmlInstallFromBrowse(id, title, btn){
+  const s=getActive(); if(!s) return;
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  try {
+    const r=await window.nexus.tmlInstallMod(s.id, id);
+    if(r&&r.ok){
+      showToast('✅', `${title} installed & enabled`);
+      if(r.name) tmlInstalledNames.add(r.name);
+      if(btn){ btn.classList.add('installed'); btn.textContent='✓ Installed'; btn.disabled=true; }
+    } else { showToast('❌', (r&&r.error)||'Install failed'); if(btn){ btn.disabled=false; btn.textContent='Install'; } }
+  } catch(e){ showToast('❌', e.message); if(btn){ btn.disabled=false; btn.textContent='Install'; } }
+}
 
 async function renderTmlMods(){
   const s=getActive(); if(!s) return;
   const list=document.getElementById('tmlModList'); if(!list) return;
   try {
     const { mods=[] } = await window.nexus.tmlListMods(s.id) || {};
+    tmlInstalledNames = new Set(mods.map(m=>m.name)); // keep Browse "Installed" badges in sync
     const cnt=document.getElementById('tmlModCount'); if(cnt) cnt.textContent = mods.length?`(${mods.length})`:'';
     if(!mods.length){ list.innerHTML='<div class="empty-msg-sm" style="padding:12px">No mods yet. Paste a Steam Workshop link above to add one.</div>'; return; }
     list.innerHTML = mods.map(m=>{
