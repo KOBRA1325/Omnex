@@ -5156,6 +5156,25 @@ async function startServerById(id) {
       exe = javaExe;
       args = ['-Xmx2G','-Xms512M','-jar', mcExec, 'nogui'];
     }
+  } else if (server.game === 'Terraria' && server.terrariaType === 'tmodloader') {
+    // Launch the .NET server DIRECTLY (dotnet tModLoader.dll) instead of the
+    // start-tModLoaderServer.bat → busybox → sh chain. That chain spawns its own
+    // console window; running dotnet directly pipes stdout/stderr/stdin into Omnex
+    // (so the console, commands, and graceful "exit" on stop all work) with no window.
+    const dll = path.join(server.installDir, 'tModLoader.dll');
+    const dotnetExe = findExe(server.installDir, 'dotnet.exe'); // bundled runtime in the release zip
+    if (dotnetExe && fs.existsSync(dll)) {
+      exe  = dotnetExe;
+      args = ['tModLoader.dll', '-server', '-config', 'serverconfig.txt', '-nosteam'];
+      spawnEnv = { ...process.env, DOTNET_ROLL_FORWARD: 'Disable' };
+      log(id, 'dim', 'Launching tModLoader server in-app via bundled .NET');
+    } else {
+      // Fallback: the launcher script (may open a separate window / limited console).
+      exe  = server.execPath || findExe(server.installDir, 'start-tModLoaderServer.bat');
+      args = ['-config', 'serverconfig.txt', '-nosteam'];
+      forceShell = true;
+      log(id, 'warn', 'Bundled .NET (dotnet.exe) not found — falling back to the launcher script');
+    }
   } else if (server.useShell) {
     exe  = server.execPath;
     args = [];
