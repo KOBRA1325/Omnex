@@ -5128,6 +5128,7 @@ async function startServerById(id) {
   let exe, args;
   let spawnEnv = null;      // custom env (used to put bundled Java on PATH for Forge run scripts)
   let forceShell = false;   // run through a shell (used for .bat/.sh launch scripts)
+  let cwdOverride = null;   // override working dir (tModLoader runs from the launcher's dir)
 
   // Steam servers need the VC++ runtime to launch; ensure it's present before
   // starting (covers imported/copied servers that never ran through the installer).
@@ -5158,22 +5159,33 @@ async function startServerById(id) {
     }
   } else if (server.game === 'Terraria' && server.terrariaType === 'tmodloader') {
     // Launch the .NET server DIRECTLY (dotnet tModLoader.dll) instead of the
-    // start-tModLoaderServer.bat → busybox → sh chain. That chain spawns its own
-    // console window; running dotnet directly pipes stdout/stderr/stdin into Omnex
-    // (so the console, commands, and graceful "exit" on stop all work) with no window.
-    const dll = path.join(server.installDir, 'tModLoader.dll');
-    const dotnetExe = findExe(server.installDir, 'dotnet.exe'); // bundled runtime in the release zip
-    if (dotnetExe && fs.existsSync(dll)) {
-      exe  = dotnetExe;
-      args = ['tModLoader.dll', '-server', '-config', 'serverconfig.txt', '-nosteam'];
+    // start-tModLoaderServer.bat → busybox → sh chain, which spawns its own console
+    // window. Running dotnet directly pipes stdout/stderr/stdin into Omnex (console,
+    // commands, and graceful "exit" on stop all work) with no window.
+    // The tML files live next to the launcher (may be a subfolder), so anchor there.
+    const tmlDir = (server.execPath && /start-tModLoaderServer\.bat$/i.test(server.execPath))
+      ? path.dirname(server.execPath) : server.installDir;
+    const dll = path.join(tmlDir, 'tModLoader.dll');
+    // Prefer a bundled dotnet; else resolve the system dotnet's full path.
+    let dotnetPath = findExe(tmlDir, 'dotnet.exe');
+    if (!dotnetPath) {
+      try {
+        const out = require('child_process').execSync('where dotnet', { encoding: 'utf8' });
+        dotnetPath = out.split(/\r?\n/).map(l => l.trim()).find(l => /dotnet\.exe$/i.test(l)) || null;
+      } catch (e) {}
+    }
+    if (dotnetPath && fs.existsSync(dll)) {
+      exe  = dotnetPath;
+      args = ['tModLoader.dll', '-server', '-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam'];
       spawnEnv = { ...process.env, DOTNET_ROLL_FORWARD: 'Disable' };
-      log(id, 'dim', 'Launching tModLoader server in-app via bundled .NET');
+      cwdOverride = tmlDir;
+      log(id, 'dim', `Launching tModLoader in-app via ${/[\\/]dotnet[\\/]/i.test(dotnetPath) ? 'bundled' : 'system'} .NET`);
     } else {
-      // Fallback: the launcher script (may open a separate window / limited console).
+      // Fallback: the launcher script (opens its own console window).
       exe  = server.execPath || findExe(server.installDir, 'start-tModLoaderServer.bat');
-      args = ['-config', 'serverconfig.txt', '-nosteam'];
+      args = ['-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam'];
       forceShell = true;
-      log(id, 'warn', 'Bundled .NET (dotnet.exe) not found — falling back to the launcher script');
+      log(id, 'warn', dotnetPath ? 'tModLoader.dll not found — using the launcher script' : '.NET runtime (dotnet) not found — using the launcher script');
     }
   } else if (server.useShell) {
     exe  = server.execPath;
@@ -5208,7 +5220,7 @@ async function startServerById(id) {
   }
 
   try {
-    const spawnOpts = { cwd:server.installDir, shell: !!server.useShell || forceShell, windowsHide: true };
+    const spawnOpts = { cwd: cwdOverride || server.installDir, shell: !!server.useShell || forceShell, windowsHide: true };
     if (spawnEnv) spawnOpts.env = spawnEnv;
     const proc = spawn(exe, args, spawnOpts);
     serverProcesses[id] = proc;
