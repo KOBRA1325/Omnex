@@ -5165,27 +5165,39 @@ async function startServerById(id) {
     // The tML files live next to the launcher (may be a subfolder), so anchor there.
     const tmlDir = (server.execPath && /start-tModLoaderServer\.bat$/i.test(server.execPath))
       ? path.dirname(server.execPath) : server.installDir;
-    const dll = path.join(tmlDir, 'tModLoader.dll');
-    // Prefer a bundled dotnet; else resolve the system dotnet's full path.
+    // Locate tModLoader.dll (usually next to the launcher; search as a backstop).
+    let dll = path.join(tmlDir, 'tModLoader.dll');
+    if (!fs.existsSync(dll)) { const f = findFileRecursive(server.installDir, 'tModLoader.dll', 4); if (f) dll = f; }
+    const dllDir = path.dirname(dll);
+    // Find a .NET runtime: bundled → common install dirs → PATH. (Omnex runs elevated,
+    // so `where dotnet` can miss a per-user install — check the standard dirs too.)
     let dotnetPath = findExe(tmlDir, 'dotnet.exe');
     if (!dotnetPath) {
-      try {
-        const out = require('child_process').execSync('where dotnet', { encoding: 'utf8' });
-        dotnetPath = out.split(/\r?\n/).map(l => l.trim()).find(l => /dotnet\.exe$/i.test(l)) || null;
-      } catch (e) {}
+      const cands = [
+        process.env.ProgramW6432 && path.join(process.env.ProgramW6432, 'dotnet', 'dotnet.exe'),
+        process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'dotnet', 'dotnet.exe'),
+        process.env['ProgramFiles(x86)'] && path.join(process.env['ProgramFiles(x86)'], 'dotnet', 'dotnet.exe'),
+        process.env.USERPROFILE && path.join(process.env.USERPROFILE, '.dotnet', 'dotnet.exe'),
+        'C:\\Program Files\\dotnet\\dotnet.exe',
+      ].filter(Boolean);
+      dotnetPath = cands.find(p => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
     }
+    if (!dotnetPath) {
+      try { const out = require('child_process').execSync('where dotnet', { encoding: 'utf8' }); dotnetPath = out.split(/\r?\n/).map(l => l.trim()).find(l => /dotnet\.exe$/i.test(l)) || null; } catch (e) {}
+    }
+    log(id, 'info', `tModLoader: dotnet=${dotnetPath || 'NOT FOUND'} · tModLoader.dll=${fs.existsSync(dll) ? 'found' : 'MISSING'}`);
     if (dotnetPath && fs.existsSync(dll)) {
       exe  = dotnetPath;
       args = ['tModLoader.dll', '-server', '-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam'];
       spawnEnv = { ...process.env, DOTNET_ROLL_FORWARD: 'Disable' };
-      cwdOverride = tmlDir;
-      log(id, 'dim', `Launching tModLoader in-app via ${/[\\/]dotnet[\\/]/i.test(dotnetPath) ? 'bundled' : 'system'} .NET`);
+      cwdOverride = dllDir;
+      log(id, 'dim', 'Launching tModLoader in-app (dotnet) — no separate window');
     } else {
       // Fallback: the launcher script (opens its own console window).
       exe  = server.execPath || findExe(server.installDir, 'start-tModLoaderServer.bat');
       args = ['-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam'];
       forceShell = true;
-      log(id, 'warn', dotnetPath ? 'tModLoader.dll not found — using the launcher script' : '.NET runtime (dotnet) not found — using the launcher script');
+      log(id, 'warn', dotnetPath ? 'tModLoader.dll not found — using the launcher script (separate window)' : '.NET runtime not found — using the launcher script (separate window)');
     }
   } else if (server.useShell) {
     exe  = server.execPath;
