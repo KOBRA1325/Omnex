@@ -1545,6 +1545,37 @@ async function installTModLoader(serverId, installDir) {
 
   const launcher = findExe(installDir, 'start-tModLoaderServer.bat');
   if (!launcher) throw new Error('start-tModLoaderServer.bat not found in the tModLoader package.');
+
+  // Pre-provision the .NET runtime that tModLoader needs, exactly the way its own
+  // launcher would on first run — download+extract here (no window, no server) so
+  // the very first Start launches directly in Omnex instead of falling back to the
+  // .bat (which pops its own console window while it fetches .NET).
+  try {
+    const tmlDir = path.dirname(launcher);
+    const dotnetExe = path.join(tmlDir, 'dotnet', 'dotnet.exe');
+    if (!fs.existsSync(dotnetExe)) {
+      let ver = '8.0.0';
+      try {
+        const rc = fs.readFileSync(path.join(tmlDir, 'tModLoader.runtimeconfig.json'), 'utf8');
+        const m = rc.match(/"version"\s*:\s*"([0-9][^"]*)"/);
+        if (m) ver = m[1].trim();
+      } catch (e) {}
+      log(serverId, 'info', `Provisioning .NET ${ver} runtime for tModLoader...`);
+      const rtZip = path.join(tmlDir, `dotnet-runtime-${ver}.zip`);
+      const url = `https://dotnetcli.azureedge.net/dotnet/Runtime/${ver}/dotnet-runtime-${ver}-win-x64.zip`;
+      await downloadFile(url, rtZip, pct => {
+        const filled = Math.floor(pct / 5);
+        emit('console-progress', { serverId, text: `⬇  .NET ${ver}  [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${pct}%` });
+      });
+      await extractZip(rtZip, path.join(tmlDir, 'dotnet'));
+      try { fs.rmSync(rtZip, { force: true }); } catch (e) {}
+      if (fs.existsSync(dotnetExe)) log(serverId, 'success', '✔ .NET runtime ready — tModLoader will run inside Omnex.');
+      else log(serverId, 'warn', '.NET provisioning finished but dotnet.exe was not found; the launcher will fetch it on first start (opens a window once).');
+    }
+  } catch (e) {
+    log(serverId, 'warn', `Could not pre-install .NET (${e.message}); the launcher will fetch it on first start (opens a window once).`);
+  }
+
   return launcher;
 }
 
