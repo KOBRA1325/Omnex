@@ -158,6 +158,12 @@ contextBridge.exposeInMainWorld('nexus', {
   detectMcLoader:        (id)     => ipcRenderer.invoke('detect-mc-loader', id),
   deleteMod:             (serverId, modPath) => ipcRenderer.invoke('delete-mod', { serverId, modPath }),
 
+  // tModLoader mods (.tmod via Steam Workshop, anonymous SteamCMD)
+  tmlListMods:           (serverId)          => ipcRenderer.invoke('tml-list-mods', serverId),
+  tmlToggleMod:          (serverId, name, enabled) => ipcRenderer.invoke('tml-toggle-mod', { serverId, name, enabled }),
+  tmlDeleteMod:          (serverId, name)    => ipcRenderer.invoke('tml-delete-mod', { serverId, name }),
+  tmlInstallMod:         (serverId, input)   => ipcRenderer.invoke('tml-install-mod', { serverId, input }),
+
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),
   saveAutoRestart:   (id, settings)=> ipcRenderer.invoke('save-autorestart', { id, settings }),

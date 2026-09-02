@@ -1146,8 +1146,9 @@ function renderHeader() {
   if(btnLogs)    btnLogs.disabled    = false;
   if(btnMods) {
     // Show for every Minecraft server so it's discoverable; the browser itself
-    // explains when a server (Vanilla) can't load mods.
-    btnMods.style.display = s.game==='Minecraft' ? '' : 'none';
+    // explains when a server (Vanilla) can't load mods. Also show for tModLoader.
+    const isTml = s.game==='Terraria' && s.terrariaType==='tmodloader';
+    btnMods.style.display = (s.game==='Minecraft' || isTml) ? '' : 'none';
     btnMods.disabled = false;
   }
   if(btnWS) btnWS.style.display = 'none';
@@ -2399,6 +2400,8 @@ async function installModpack(projectId,title,btn){
 
 async function openModManager(){
   const s=getActive(); if(!s) return;
+  // tModLoader has its own (Steam Workshop) mod manager.
+  if(s.game==='Terraria' && s.terrariaType==='tmodloader'){ openTmlMods(); return; }
   // If the loader wasn't recorded, detect it from the install folder first.
   if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
     try { const r=await window.nexus.detectMcLoader(s.id); if(r&&r.detected&&r.loader){ s.mcType=r.loader; renderHeader(); } } catch(e){}
@@ -2513,6 +2516,66 @@ async function deleteMod(modPath){
   renderInstalledMods();
   const grid=document.getElementById('modSearchResults');
   if(grid && grid.querySelector('.mod-card')) searchMods(); // refresh install badges
+}
+
+// ── tModLoader mods (Steam Workshop) ────────────────────────────────────────────
+function openTmlMods(){
+  const s=getActive(); if(!s) return;
+  const title=document.getElementById('tmlModTitle'); if(title) title.textContent=s.name;
+  const inp=document.getElementById('tmlWorkshopInput'); if(inp) inp.value='';
+  showModal('tmlModModal');
+  renderTmlMods();
+}
+function closeTmlMods(){ hideModal('tmlModModal'); }
+
+async function renderTmlMods(){
+  const s=getActive(); if(!s) return;
+  const list=document.getElementById('tmlModList'); if(!list) return;
+  try {
+    const { mods=[] } = await window.nexus.tmlListMods(s.id) || {};
+    const cnt=document.getElementById('tmlModCount'); if(cnt) cnt.textContent = mods.length?`(${mods.length})`:'';
+    if(!mods.length){ list.innerHTML='<div class="empty-msg-sm" style="padding:12px">No mods yet. Paste a Steam Workshop link above to add one.</div>'; return; }
+    list.innerHTML = mods.map(m=>{
+      const jn = m.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      const wsLink = m.workshopId ? `<a href="#" onclick="window.nexus.openExternal('https://steamcommunity.com/sharedfiles/filedetails/?id=${m.workshopId}');return false" title="View on Steam Workshop" style="color:var(--text-dim);text-decoration:none">↗</a>` : '';
+      return `<div class="mod-installed-item">
+        <label class="tml-mod-toggle" title="${m.enabled?'Enabled':'Disabled'}">
+          <input type="checkbox" ${m.enabled?'checked':''} onchange="tmlToggleMod('${jn}', this.checked)">
+        </label>
+        <div class="mod-installed-name" title="${escapeHtml(m.name)}" style="${m.enabled?'':'opacity:.5'}">${escapeHtml(m.name)} ${wsLink}</div>
+        <div class="mod-installed-meta">${formatBytes(m.size)}</div>
+        <button class="mod-remove-btn" title="Remove" onclick="tmlDeleteMod('${jn}')">🗑</button>
+      </div>`;
+    }).join('');
+  } catch(e){ list.innerHTML='<div class="empty-msg-sm">Could not load mods.</div>'; }
+}
+
+async function tmlInstallMod(){
+  const s=getActive(); if(!s) return;
+  const inp=document.getElementById('tmlWorkshopInput'); const btn=document.getElementById('tmlInstallBtn');
+  const val=(inp?.value||'').trim();
+  if(!val){ showToast('ℹ️','Paste a Steam Workshop link or mod ID first.'); return; }
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Installing…'; }
+  try {
+    const r=await window.nexus.tmlInstallMod(s.id, val);
+    if(r&&r.ok){ showToast('✅', `${r.name} installed & enabled`); if(inp) inp.value=''; renderTmlMods(); }
+    else showToast('❌', (r&&r.error)||'Install failed');
+  } catch(e){ showToast('❌', e.message); }
+  if(btn){ btn.disabled=false; btn.textContent='⬇ Install'; }
+}
+
+async function tmlToggleMod(name, enabled){
+  const s=getActive(); if(!s) return;
+  try { const r=await window.nexus.tmlToggleMod(s.id, name, enabled); if(!(r&&r.ok)) showToast('❌',(r&&r.error)||'Could not update'); }
+  catch(e){ showToast('❌', e.message); }
+  renderTmlMods();
+}
+
+async function tmlDeleteMod(name){
+  const s=getActive(); if(!s||!confirm(`Remove ${name}?`)) return;
+  try { await window.nexus.tmlDeleteMod(s.id, name); showToast('🗑️','Mod removed'); }
+  catch(e){ showToast('❌', e.message); }
+  renderTmlMods();
 }
 
 // ── Mod detail ("read more") ──────────────────────────────────────────────────

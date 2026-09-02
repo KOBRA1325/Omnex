@@ -1546,6 +1546,11 @@ async function installTModLoader(serverId, installDir) {
   const launcher = findExe(installDir, 'start-tModLoaderServer.bat');
   if (!launcher) throw new Error('start-tModLoaderServer.bat not found in the tModLoader package.');
 
+  // Per-server mod + world folders (server runs with -tmlsavedirectory=installDir, so
+  // .tmod files + enabled.json live here and each server has its own isolated mod list).
+  try { fs.mkdirSync(path.join(installDir, 'Mods'), { recursive: true }); } catch (e) {}
+  try { fs.mkdirSync(path.join(installDir, 'Worlds'), { recursive: true }); } catch (e) {}
+
   // Pre-provision the .NET runtime that tModLoader needs, exactly the way its own
   // launcher would on first run — download+extract here (no window, no server) so
   // the very first Start launches directly in Omnex instead of falling back to the
@@ -3181,6 +3186,124 @@ ipcMain.handle('delete-mod', (e, { serverId, modPath }) => {
     saveData();
   }
   return { ok: true };
+});
+
+// ── tModLoader mods ─────────────────────────────────────────────────────────────
+// tModLoader mods are .tmod files that live in the server's Mods folder alongside an
+// enabled.json (a JSON array of enabled mod *internal* names). The server runs with
+// -tmlsavedirectory=installDir, so that folder is <installDir>/Mods. Mods are fetched
+// anonymously from the Steam Workshop via SteamCMD (app 1281930) — no Steam account.
+const TML_STEAM_APPID = '1281930';
+function tmlModsDir(server) { return path.join(server.installDir, 'Mods'); }
+function tmlReadEnabled(modsDir) {
+  try { const a = JSON.parse(fs.readFileSync(path.join(modsDir, 'enabled.json'), 'utf8')); return Array.isArray(a) ? a : []; }
+  catch (e) { return null; } // null = no enabled.json yet (tML treats that as "all enabled")
+}
+function tmlWriteEnabled(modsDir, arr) {
+  fs.mkdirSync(modsDir, { recursive: true });
+  fs.writeFileSync(path.join(modsDir, 'enabled.json'), JSON.stringify(arr, null, 2));
+}
+function tmlListTmod(modsDir) {
+  try { return fs.readdirSync(modsDir).filter(f => /\.tmod$/i.test(f)).map(f => f.replace(/\.tmod$/i, '')); }
+  catch (e) { return []; }
+}
+// Recursively collect .tmod files under a workshop item folder (tML nests them in
+// per-version subfolders). Returns the newest by folder name.
+function tmlFindBestTmod(dir) {
+  const found = [];
+  (function walk(d) {
+    let ents; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+    for (const en of ents) { const p = path.join(d, en.name); if (en.isDirectory()) walk(p); else if (/\.tmod$/i.test(en.name)) found.push(p); }
+  })(dir);
+  if (!found.length) return null;
+  return found.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop();
+}
+
+ipcMain.handle('tml-list-mods', (e, serverId) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { mods: [] };
+  const modsDir = tmlModsDir(server);
+  if (!fs.existsSync(modsDir)) return { mods: [], enabledFileExists: false };
+  const enabled = tmlReadEnabled(modsDir);
+  let files = [];
+  try { files = fs.readdirSync(modsDir).filter(f => /\.tmod$/i.test(f)); } catch (e) {}
+  const mods = files.map(f => {
+    const name = f.replace(/\.tmod$/i, '');
+    const full = path.join(modsDir, f);
+    let size = 0; try { size = fs.statSync(full).size; } catch (e) {}
+    const meta = (server.tmlMods && server.tmlMods[name]) || {};
+    return { name, file: f, size, enabled: enabled ? enabled.includes(name) : true, workshopId: meta.workshopId || null };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+  return { mods, enabledFileExists: enabled !== null };
+});
+
+ipcMain.handle('tml-toggle-mod', (e, { serverId, name, enabled }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const modsDir = tmlModsDir(server);
+  let arr = tmlReadEnabled(modsDir);
+  if (arr === null) arr = tmlListTmod(modsDir); // materialize tML's implicit "all enabled"
+  const set = new Set(arr);
+  if (enabled) set.add(name); else set.delete(name);
+  try { tmlWriteEnabled(modsDir, [...set]); } catch (err) { return { ok: false, error: err.message }; }
+  return { ok: true };
+});
+
+ipcMain.handle('tml-delete-mod', (e, { serverId, name }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const modsDir = tmlModsDir(server);
+  try { fs.rmSync(path.join(modsDir, `${name}.tmod`), { force: true }); } catch (e) {}
+  const arr = tmlReadEnabled(modsDir);
+  if (arr) { try { tmlWriteEnabled(modsDir, arr.filter(n => n !== name)); } catch (e) {} }
+  if (server.tmlMods && server.tmlMods[name]) { delete server.tmlMods[name]; saveData(); }
+  return { ok: true };
+});
+
+// Download a Workshop mod via SteamCMD (anonymous), copy its .tmod into the server's
+// Mods folder, and enable it. `input` is a Steam Workshop URL or a numeric ID.
+ipcMain.handle('tml-install-mod', async (e, { serverId, input }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const m = String(input || '').match(/(?:id=)?(\d{6,})/);
+  const wid = m && m[1];
+  if (!wid) return { ok: false, error: 'Enter a Steam Workshop link or numeric ID.' };
+  try {
+    await ensureSteamCmd(serverId);
+    const dlRoot = path.join(STEAMCMD_DIR, 'tml-workshop');
+    fs.mkdirSync(dlRoot, { recursive: true });
+    log(serverId, 'info', `⬇  Downloading tModLoader mod (workshop ${wid})...`);
+    await new Promise((resolve, reject) => {
+      const args = ['+force_install_dir', dlRoot, '+login', 'anonymous', '+workshop_download_item', TML_STEAM_APPID, wid, '+quit'];
+      const proc = spawn(STEAMCMD_EXE, args, { cwd: STEAMCMD_DIR, windowsHide: true });
+      let out = '', lastPct = -1, ok = false, errReason = '';
+      proc.stdout.on('data', d => {
+        const t = d.toString(); out += t;
+        t.split('\n').forEach(line => {
+          const pm = line.match(/progress:\s*([\d.]+)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/i);
+          if (pm) { const pct = Math.floor(parseFloat(pm[1])); if (pct !== lastPct) { lastPct = pct; const f = Math.floor(pct / 5); emit('console-progress', { serverId, text: `📦 mod  [${'█'.repeat(f)}${'░'.repeat(20 - f)}] ${pct}%` }); } return; }
+          if (/Success\. Downloaded item/i.test(line)) ok = true;
+          const em = line.match(/ERROR! Download item \d+ failed \(([^)]+)\)/i); if (em) errReason = em[1];
+        });
+      });
+      proc.stderr.on('data', d => { out += d.toString(); });
+      proc.on('error', reject);
+      proc.on('close', () => { (ok || /Success\. Downloaded item/i.test(out)) ? resolve() : reject(new Error(errReason || 'SteamCMD could not download that mod (check the ID).')); });
+    });
+    const itemDir = path.join(dlRoot, 'steamapps', 'workshop', 'content', TML_STEAM_APPID, wid);
+    const tmod = tmlFindBestTmod(itemDir);
+    if (!tmod) return { ok: false, error: 'Downloaded, but no .tmod was found (the item may be hidden or for a different tML version).' };
+    const modsDir = tmlModsDir(server); fs.mkdirSync(modsDir, { recursive: true });
+    const base = path.basename(tmod);
+    fs.copyFileSync(tmod, path.join(modsDir, base));
+    const name = base.replace(/\.tmod$/i, '');
+    let arr = tmlReadEnabled(modsDir); if (arr === null) arr = tmlListTmod(modsDir);
+    if (!arr.includes(name)) arr.push(name);
+    tmlWriteEnabled(modsDir, arr);
+    server.tmlMods = server.tmlMods || {}; server.tmlMods[name] = { workshopId: wid }; saveData();
+    log(serverId, 'success', `✔ Mod installed & enabled: ${name}`);
+    return { ok: true, name };
+  } catch (err) { return { ok: false, error: err.message }; }
 });
 
 
@@ -5219,14 +5342,14 @@ async function startServerById(id) {
     log(id, 'info', `tModLoader: dotnet=${dotnetPath || 'NOT FOUND'} · tModLoader.dll=${fs.existsSync(dll) ? 'found' : 'MISSING'}`);
     if (dotnetPath && fs.existsSync(dll)) {
       exe  = dotnetPath;
-      args = ['tModLoader.dll', '-server', '-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam'];
+      args = ['tModLoader.dll', '-server', '-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam', '-tmlsavedirectory', server.installDir];
       spawnEnv = { ...process.env, DOTNET_ROLL_FORWARD: 'Disable' };
       cwdOverride = dllDir;
       log(id, 'dim', 'Launching tModLoader in-app (dotnet) — no separate window');
     } else {
       // Fallback: the launcher script (opens its own console window).
       exe  = server.execPath || findExe(server.installDir, 'start-tModLoaderServer.bat');
-      args = ['-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam'];
+      args = ['-config', path.join(server.installDir, 'serverconfig.txt'), '-nosteam', '-tmlsavedirectory', server.installDir];
       forceShell = true;
       log(id, 'warn', dotnetPath ? 'tModLoader.dll not found — using the launcher script (separate window)' : '.NET runtime not found — using the launcher script (separate window)');
     }

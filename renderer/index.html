@@ -640,6 +640,35 @@
   </div>
 </div>
 
+<!-- tMODLOADER MODS MODAL -->
+<div class="modal-overlay" id="tmlModModal">
+  <div class="modal modal-tall" style="width:min(720px, 95vw)">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>🧩 &nbsp;tModLoader Mods · <span id="tmlModTitle"></span></span>
+      <button class="btn-modal-cancel" onclick="closeTmlMods()">✕ Close</button>
+    </div>
+
+    <!-- Install by Steam Workshop link / ID -->
+    <div class="config-group-label" style="margin-top:4px">➕ Add a mod from the Steam Workshop</div>
+    <div style="display:flex; gap:8px; align-items:center">
+      <input class="form-input" id="tmlWorkshopInput" style="flex:1; pointer-events:all"
+        placeholder="Steam Workshop link or ID (e.g. https://steamcommunity.com/…?id=2824688072)"
+        onkeydown="if(event.key==='Enter')tmlInstallMod()" />
+      <button class="btn btn-primary" id="tmlInstallBtn" style="pointer-events:all" onclick="tmlInstallMod()">⬇ Install</button>
+    </div>
+    <div class="empty-msg-sm" style="padding:6px 2px 0; line-height:1.5">
+      Find mods in the <b>tModLoader Steam Workshop</b> and paste a mod's page link (or its numeric ID) above.
+      Mods download without a Steam account. <b>Restart the server</b> for mod changes to take effect.
+    </div>
+
+    <!-- Installed mods -->
+    <div class="config-group-label" style="margin-top:14px">📦 Installed <span id="tmlModCount" style="color:var(--text-dim); font-weight:400"></span></div>
+    <div class="mod-installed-list" id="tmlModList" style="max-height:46vh; overflow:auto">
+      <div class="empty-msg-sm">Loading…</div>
+    </div>
+  </div>
+</div>
+
 <!-- SETTINGS MODAL -->
 <div class="modal-overlay" id="settingsModal">
   <div class="modal modal-wide modal-settings">
