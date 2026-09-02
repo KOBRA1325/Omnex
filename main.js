@@ -5292,6 +5292,16 @@ async function startServerById(id) {
     startLogTailer(id, server);
     proc.stdout.on('data', d => {
       d.toString().split(/\r?\n/).filter(l=>l.trim()).forEach(l => {
+        // Terraria/tModLoader world generation prints one line per 0.1% ("21.6% -
+        // Adding more grass - 55.0%"), flooding the console with thousands of lines.
+        // Collapse it into a single updating progress bar (same as download bars).
+        const wg = l.match(/^\s*(\d+(?:\.\d+)?)%\s*-\s*(.+?)\s*-\s*(\d+(?:\.\d+)?)%\s*$/);
+        if (wg && server.game === 'Terraria') {
+          const pct = Math.max(0, Math.min(100, parseFloat(wg[1])));
+          const filled = Math.floor(pct / 5);
+          emit('console-progress', { serverId: id, text: `🌍  Generating world  [${'█'.repeat(filled)}${'░'.repeat(20 - filled)}] ${wg[1]}%  ·  ${wg[2]}` });
+          return;
+        }
         // Suppress /list command output from flooding the console
         if (/There are \d+ of a max(imum)? of \d+ players online/i.test(l)) {
           parsePlayerEvent(id, l); // still parse for player names
