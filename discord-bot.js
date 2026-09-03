@@ -18,6 +18,18 @@ const API = 'https://discord.com/api/v10';
 const GATEWAY = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const FATAL_CLOSE = new Set([4004, 4010, 4011, 4012, 4013, 4014]); // bad token / bad intents / etc.
 
+// Wrap a plain bot message into an embed styled like Omnex's webhook cards
+// (footer "Omnex" + timestamp + an outcome colour inferred from the leading emoji),
+// so command replies match the notification cards.
+function embedOf(content) {
+  const t = String(content == null ? '' : content);
+  let color = 0x5865F2; // neutral (blurple)
+  if (/^\s*(✅|🟢|🔗|🆔|🎉)/.test(t)) color = 0x57F287;        // success → green
+  else if (/^\s*(❌|⛔|🔒|⚠️|🛑)/.test(t)) color = 0xED4245;   // error/blocked → red
+  else if (/^\s*(⏳|🔄|⬇|📦)/.test(t)) color = 0xFEE75C;       // in-progress → yellow
+  return { description: t.slice(0, 4096), color, footer: { text: 'Omnex' }, timestamp: new Date().toISOString() };
+}
+
 // Option types: 1=SUB_COMMAND 3=STRING 6=USER 7=CHANNEL
 const COMMANDS = [
   { name: 'status',  description: "Show this channel's server status", type: 1 },
@@ -258,12 +270,14 @@ class DiscordBot {
     const channelId = d.channel_id;
     const D = this.deps;
 
+    // All bot responses render as embeds (footer "Omnex" + timestamp + outcome
+    // colour) so they match the webhook notification cards.
     const reply = (content, ephemeral = true) =>
-      this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 4, data: { content, flags: ephemeral ? 64 : 0 } }).catch(() => {});
+      this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 4, data: { embeds: [embedOf(content)], flags: ephemeral ? 64 : 0 } }).catch(() => {});
     const defer = (ephemeral = true) =>
       this._rest('POST', `/interactions/${d.id}/${d.token}/callback`, { type: 5, data: { flags: ephemeral ? 64 : 0 } }).catch(() => {});
     const edit = (content) =>
-      this._rest('PATCH', `/webhooks/${this.appId}/${d.token}/messages/@original`, { content }).catch(() => {});
+      this._rest('PATCH', `/webhooks/${this.appId}/${d.token}/messages/@original`, { content: '', embeds: [embedOf(content)] }).catch(() => {});
 
     try {
       // ── Help (public) ──
@@ -385,7 +399,11 @@ class DiscordBot {
     const fileBuf = fs.readFileSync(filePath);
     const filename = 'world-map.png';
     const boundary = '----Omnex' + Date.now().toString(16);
-    const payload = JSON.stringify({ content, attachments: [{ id: 0, filename }] });
+    const payload = JSON.stringify({
+      content: '',
+      embeds: [{ description: content, color: 0x5865F2, image: { url: `attachment://${filename}` }, footer: { text: 'Omnex' }, timestamp: new Date().toISOString() }],
+      attachments: [{ id: 0, filename }],
+    });
     const head = Buffer.from(
       `--${boundary}\r\n` +
       'Content-Disposition: form-data; name="payload_json"\r\n' +
