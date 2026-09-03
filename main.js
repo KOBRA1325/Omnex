@@ -3813,7 +3813,11 @@ async function discordGetMapLink(serverId) {
 }
 
 // /link — bind a channel to a server explicitly (overrides webhook-derived linking).
-async function discordLinkChannel(channelId, ref) {
+// Gated by the Omnex admin password so a channel can't be re-linked without it.
+async function discordLinkChannel(channelId, ref, adminPassword) {
+  const gate = String(appSettings.discordCreatePassword || '');
+  if (!gate) return { message: '🔒 Linking is disabled — set an admin password in Omnex (Settings → Discord → Bot control) first.' };
+  if (String(adminPassword || '') !== gate) return { message: '🔒 Wrong admin password.' };
   const s = discordResolveServerRef(ref);
   if (!s) return { message: '⚠️ Server not found. Use the picker or `/serverid`.' };
   if (!/^\d{5,}$/.test(String(channelId))) return { message: '⚠️ Invalid channel.' };
@@ -3907,7 +3911,7 @@ function getDiscordBot() {
       listServers: () => appData.servers.map(s => ({ id: s.id, name: s.name, game: s.game })),
       listCreatableGames: () => Object.keys(GAME_DEFAULT_PORTS).filter(g => !(GAME_DEFS[g] && GAME_DEFS[g].type === 'import')),
       getMapLink: (serverId) => discordGetMapLink(serverId),
-      linkChannel: (channelId, ref) => discordLinkChannel(channelId, ref),
+      linkChannel: (channelId, ref, adminPassword) => discordLinkChannel(channelId, ref, adminPassword),
       accountChange: (action, targetId, scope, ctxServerId) => discordAccountChange(action, targetId, scope, ctxServerId),
       createServer: (game, name, password, userName, createKey) => discordCreateServer(game, name, password, userName, createKey),
       deleteServer: (ref, adminPassword, userName) => discordDeleteServer(ref, adminPassword, userName),

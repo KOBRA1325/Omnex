@@ -28,10 +28,11 @@ const COMMANDS = [
   { name: 'commands', description: 'List every Omnex bot command', type: 1 },
   { name: 'serverid', description: '(admin) Show a server\'s ID', type: 1, options: [
       { name: 'server', description: 'Server name', type: 3, required: true, autocomplete: true } ] },
-  { name: 'link', description: '(admin) Link this channel to a server', type: 1, options: [
-      { name: 'server',   description: 'Pick a server by name', type: 3, required: false, autocomplete: true },
-      { name: 'serverid', description: 'Or a server ID', type: 3, required: false },
-      { name: 'channel',  description: 'Channel to link (default: here)', type: 7, required: false } ] },
+  { name: 'link', description: '(admin) Link this channel to a server — needs the admin password', type: 1, options: [
+      { name: 'adminpassword', description: 'Omnex admin password', type: 3, required: true },
+      { name: 'server',        description: 'Pick a server by name', type: 3, required: false, autocomplete: true },
+      { name: 'serverid',      description: 'Or a server ID', type: 3, required: false },
+      { name: 'channel',       description: 'Channel to link (default: here)', type: 7, required: false } ] },
   { name: 'account', description: '(admin) Manage who can run commands', type: 1, options: [
       { name: 'add', description: 'Grant command access', type: 1, options: [
           { name: 'user',  description: 'Pick a user', type: 6, required: false },
@@ -218,7 +219,7 @@ class DiscordBot {
       '• `/start` · `/stop` · `/restart` · `/backup`',
       '',
       '__Admins only__',
-      '• `/link server:<name>` — link this channel to a server',
+      '• `/link server:<name> adminpassword:<pw>` — link this channel to a server',
       '• `/admin add|remove user:@who` — grant/revoke **global admin** (all servers)',
       '• `/account add|remove user:@who [scope]` — grant/revoke access (this server or admin)',
       '• `/serverid server:<name>` — show a server\'s ID',
@@ -278,9 +279,10 @@ class DiscordBot {
         if (name === 'link') {
           const ref = this._opt(d, 'server') || this._opt(d, 'serverid');
           const ch = this._opt(d, 'channel') || channelId;
+          const pw = this._opt(d, 'adminpassword') || '';
           if (!ref) return reply('⚠️ Pick a server (or give a server ID).', true);
           await defer(true);
-          return edit((await D.linkChannel(ch, ref)).message);
+          return edit((await D.linkChannel(ch, ref, pw)).message);
         }
         if (name === 'account') {
           const sub = (d.data.options && d.data.options[0]) || {};
