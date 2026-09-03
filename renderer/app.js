@@ -217,15 +217,16 @@ function copyToClipboard(text) {
 // ── Console ───────────────────────────────────────────────────────────────────
 function appendLog(type, text, ts) {
   const time = ts || new Date().toLocaleTimeString('en-US', { hour12: false });
-  const mc = getActive()?.game === 'Minecraft'; // chat tab only routes for Minecraft
+  const game = getActive()?.game;                       // chat routes for Minecraft + Terraria
+  const routeChat = game === 'Minecraft' || game === 'Terraria';
   text.split('\n').filter(l => l.trim()).forEach(l => {
     // Display-side backstop: never show the Minecraft health/position poll replies,
     // regardless of what the engine sends (keeps the console clean even if an older
     // main process is still running the server).
     if (/has the following entity data:/.test(l)) return;
     if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
-    // Minecraft chat has its own Chat tab (+ Activity feed) — keep it out of the console.
-    if (mc) { const c = parseChatLine(l); if (c) { appendChat(c.name, c.msg, time); return; } }
+    // Player chat has its own Chat tab (+ Activity feed) — keep it out of the console.
+    if (routeChat) { const c = parseChatLine(l, game); if (c) { appendChat(c.name, c.msg, time); return; } }
     _consoleBuf.push({ type, text: l, time });
   });
   if (!_consoleRaf) _consoleRaf = requestAnimationFrame(_flushConsole);
@@ -350,10 +351,13 @@ function openPanelExternal() {
   try { window.nexus.openExternal(url); } catch(e) {}
 }
 
-// Chat: detect "<Name> message" lines and mirror them into the Chat tab.
-function parseChatLine(text) {
+// Chat: detect "<Name> message" lines and mirror them into the Chat tab. Terraria
+// player names can contain spaces/symbols, so it uses a broader capture there.
+function parseChatLine(text, game) {
   // Trim trailing CR/whitespace first — CRLF-sourced lines otherwise break the `$` anchor.
-  const m = String(text).replace(/[\r\n]+$/, '').match(/<([A-Za-z0-9_]{1,16})>\s(.+)$/);
+  const t = String(text).replace(/[\r\n]+$/, '');
+  const re = game === 'Terraria' ? /^<([^>]{1,32})>\s?(.+)$/ : /<([A-Za-z0-9_]{1,16})>\s(.+)$/;
+  const m = t.match(re);
   return m ? { name: m[1], msg: m[2] } : null;
 }
 function appendChat(name, msg, time) {
@@ -1104,7 +1108,7 @@ async function selectServer(id) {
   const tabs = document.getElementById('serverTabs');
   if (tabs) tabs.style.display = (isMc || isFs || isTerraria) ? 'flex' : 'none';
   const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria) ? '' : 'none';
-  const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = isMc ? '' : 'none';
+  const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = (isMc || isTerraria) ? '' : 'none';
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
