@@ -164,6 +164,8 @@ contextBridge.exposeInMainWorld('nexus', {
   tmlDeleteMod:          (serverId, name)    => ipcRenderer.invoke('tml-delete-mod', { serverId, name }),
   tmlInstallMod:         (serverId, input)   => ipcRenderer.invoke('tml-install-mod', { serverId, input }),
   tmlBrowseMods:         (opts)              => ipcRenderer.invoke('tml-browse-mods', opts),
+  terrariaRenderMap:     (serverId)          => ipcRenderer.invoke('terraria-render-map', serverId),
+  terrariaMapInfo:       (serverId)          => ipcRenderer.invoke('terraria-map-info', serverId),
 
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),

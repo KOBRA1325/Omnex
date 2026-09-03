@@ -1,6 +1,6 @@
 {
   "name": "omnex",
-  "version": "0.5.82",
+  "version": "0.5.83",
   "description": "Omnex - Game Server Manager",
   "main": "main.js",
   "author": {
@@ -26,6 +26,7 @@
     "steam-session": "^1.9.2",
     "steam-totp": "^2.1.2",
     "systeminformation": "^5.22.0",
+    "terraria-world-file": "^1.1.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {
@@ -53,6 +54,7 @@
       "preload.js",
       "discord-bot.js",
       "steam-auth.js",
+      "terraria-map-worker.js",
       "renderer/**/*",
       "assets/**/*",
       "!assets/*-source.*",
@@ -61,6 +63,10 @@
       "package.json",
       "LICENSE",
       "THIRD_PARTY_NOTICES.md"
+    ],
+    "asarUnpack": [
+      "terraria-map-worker.js",
+      "node_modules/terraria-world-file/**"
     ],
     "extraResources": [
       {

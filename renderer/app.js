@@ -263,7 +263,14 @@ function switchServerTab(tab) {
     if (view) view.style.display = (t === tab) ? 'flex' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   }
-  if (tab === 'map')      { updateMapView(); }
+  if (tab === 'map') {
+    const s = getActive();
+    const isTerraria = !!(s && s.game === 'Terraria');
+    const mc = document.getElementById('mapMc'), tr = document.getElementById('mapTerraria');
+    if (mc) mc.style.display = isTerraria ? 'none' : 'flex';
+    if (tr) tr.style.display = isTerraria ? 'flex' : 'none';
+    if (isTerraria) updateTerrariaMap(); else updateMapView();
+  }
   if (tab === 'panel')    { updatePanelView(); }
   if (tab === 'chat')     { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
   if (tab === 'activity') { const o = document.getElementById('activityFeed'); if (o) o.scrollTop = o.scrollHeight; }
@@ -407,6 +414,101 @@ function openMapExternal() {
   const input = document.getElementById('mapUrlInput');
   const url = ((input && input.value) || '').trim() || mapUrlFor(s, (s.mapMode === 'dynmap') ? 'dynmap' : 'bluemap');
   try { window.nexus.openExternal(url); } catch(e) {}
+}
+
+// ── Terraria world map (rendered from the .wld, pan/zoom image) ─────────────────
+let tmap = { scale: 1, tx: 0, ty: 0, natW: 0, natH: 0 };
+let _tmapAutoTimer = null;
+let _tmapBound = false;
+
+async function updateTerrariaMap() {
+  const s = getActive(); if (!s) return;
+  bindTerrariaMapPanZoom();
+  try {
+    const info = await window.nexus.terrariaMapInfo(s.id);
+    if (s.id !== activeId) return;
+    if (info && info.exists) tmapSetImage(info.path, info.mtime, info.width, info.height, info.name);
+    else tmapShowEmpty('Click <b>Render map</b> to generate a map of your world.');
+  } catch (e) { tmapShowEmpty('Click <b>Render map</b> to generate a map of your world.'); }
+  syncTerrariaMapAuto();
+}
+
+function tmapShowEmpty(msg) {
+  const img = document.getElementById('tMapImg'), empty = document.getElementById('tMapEmpty'), info = document.getElementById('tMapInfo');
+  if (img) { img.style.display = 'none'; img.removeAttribute('src'); }
+  if (empty) { empty.style.display = 'flex'; empty.innerHTML = msg; }
+  if (info) info.textContent = '';
+}
+
+function tmapSetImage(pathStr, mtime, w, h, name) {
+  const img = document.getElementById('tMapImg'), empty = document.getElementById('tMapEmpty'), info = document.getElementById('tMapInfo');
+  if (!img) return;
+  img.onload = () => { tmap.natW = img.naturalWidth; tmap.natH = img.naturalHeight; tMapFit(); };
+  img.src = fileUrl(pathStr) + '?t=' + (mtime || Date.now());
+  img.style.display = 'block';
+  if (empty) empty.style.display = 'none';
+  if (info) info.textContent = (w && h) ? `${name || 'world'} · ${w}×${h}` : (name || '');
+}
+
+async function renderTerrariaMap() {
+  const s = getActive(); if (!s) return;
+  const btn = document.getElementById('tMapRenderBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Rendering…'; }
+  try {
+    const r = await window.nexus.terrariaRenderMap(s.id);
+    if (r && r.ok) { tmapSetImage(r.path, r.mtime, r.width, r.height, r.name); showToast('🗺️', 'World map rendered'); }
+    else { tmapShowEmpty(escapeHtml((r && r.error) || 'Could not render the map.')); showToast('❌', (r && r.error) || 'Render failed'); }
+  } catch (e) { showToast('❌', e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = '🗺 Render map'; }
+}
+
+function tMapApply() { const img = document.getElementById('tMapImg'); if (img) img.style.transform = `translate(${tmap.tx}px,${tmap.ty}px) scale(${tmap.scale})`; }
+function tMapFit() {
+  const wrap = document.getElementById('tMapWrap'), img = document.getElementById('tMapImg');
+  if (!wrap || !img || !tmap.natW) return;
+  const sc = Math.min(wrap.clientWidth / tmap.natW, wrap.clientHeight / tmap.natH);
+  tmap.scale = sc > 0 ? sc : 1;
+  tmap.tx = (wrap.clientWidth - tmap.natW * tmap.scale) / 2;
+  tmap.ty = (wrap.clientHeight - tmap.natH * tmap.scale) / 2;
+  tMapApply();
+}
+function tMapZoom(f) {
+  const wrap = document.getElementById('tMapWrap'); if (!wrap) return;
+  const cx = wrap.clientWidth / 2, cy = wrap.clientHeight / 2;
+  const ns = Math.max(0.03, Math.min(10, tmap.scale * f));
+  tmap.tx = cx - (cx - tmap.tx) * (ns / tmap.scale);
+  tmap.ty = cy - (cy - tmap.ty) * (ns / tmap.scale);
+  tmap.scale = ns; tMapApply();
+}
+function tMapOpenExternal() { const img = document.getElementById('tMapImg'); if (img && img.src) { try { window.nexus.openExternal(img.src.split('?')[0]); } catch (e) {} } }
+
+function bindTerrariaMapPanZoom() {
+  if (_tmapBound) return;
+  const wrap = document.getElementById('tMapWrap'); if (!wrap) return;
+  _tmapBound = true;
+  let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  wrap.addEventListener('mousedown', e => { dragging = true; sx = e.clientX; sy = e.clientY; ox = tmap.tx; oy = tmap.ty; wrap.style.cursor = 'grabbing'; });
+  window.addEventListener('mousemove', e => { if (!dragging) return; tmap.tx = ox + (e.clientX - sx); tmap.ty = oy + (e.clientY - sy); tMapApply(); });
+  window.addEventListener('mouseup', () => { dragging = false; wrap.style.cursor = 'grab'; });
+  wrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = wrap.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const f = e.deltaY < 0 ? 1.15 : 0.87;
+    const ns = Math.max(0.03, Math.min(10, tmap.scale * f));
+    tmap.tx = mx - (mx - tmap.tx) * (ns / tmap.scale);
+    tmap.ty = my - (my - tmap.ty) * (ns / tmap.scale);
+    tmap.scale = ns; tMapApply();
+  }, { passive: false });
+}
+
+function toggleTerrariaMapAuto() { syncTerrariaMapAuto(); }
+function syncTerrariaMapAuto() {
+  clearInterval(_tmapAutoTimer); _tmapAutoTimer = null;
+  const chk = document.getElementById('tMapAuto'); if (!chk || !chk.checked) return;
+  _tmapAutoTimer = setInterval(() => {
+    const s = getActive();
+    if (s && s.status === 'online' && currentServerTab === 'map' && s.game === 'Terraria') renderTerrariaMap();
+  }, 30000);
 }
 
 // ── Console search ────────────────────────────────────────────────────────────
@@ -992,14 +1094,15 @@ async function selectServer(id) {
   const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
   _consoleBuf = []; // drop any pending lines queued from the previous server
   const s = servers.find(sv => sv.id === id);
-  // Tabs are per-game: Minecraft gets Chat + Map; Farming Simulator 25 gets Web Admin.
+  // Tabs are per-game: Minecraft gets Chat + Map; Terraria gets Map; FS25 gets Web Admin.
   const isMc = !!(s && s.game === 'Minecraft');
   const isFs = !!(s && s.game === 'Farming Simulator 25');
+  const isTerraria = !!(s && s.game === 'Terraria');
   const tabs = document.getElementById('serverTabs');
-  if (tabs) tabs.style.display = (isMc || isFs) ? 'flex' : 'none';
+  if (tabs) tabs.style.display = (isMc || isFs || isTerraria) ? 'flex' : 'none';
   const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = isMc ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = isMc ? '' : 'none';
-  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = isMc ? '' : 'none';
+  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
   if (isMc) loadActivity(id);

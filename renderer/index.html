@@ -224,19 +224,40 @@
           </div>
         </div>
 
-        <!-- Map tab (Minecraft): embed a server map plugin — BlueMap or Dynmap -->
+        <!-- Map tab: Minecraft embeds BlueMap/Dynmap; Terraria renders the world image -->
         <div class="tab-view" id="tabMap" style="display:none">
-          <div class="map-modebar">
-            <button class="server-tab active" id="mapModeBlue" onclick="setMapMode('bluemap')">🗺 BlueMap</button>
-            <button class="server-tab" id="mapModeDyn" onclick="setMapMode('dynmap')">🗺 Dynmap</button>
-            <input class="map-url-input" id="mapUrlInput" placeholder="http://localhost:8100"
-              onkeydown="if(event.key==='Enter')applyMapUrl()" style="pointer-events:all">
-            <button class="server-tab" onclick="applyMapUrl()">Load</button>
-            <button class="server-tab" onclick="openMapExternal()" title="Open in browser">↗</button>
+          <!-- Minecraft map (BlueMap / Dynmap) -->
+          <div id="mapMc" style="display:flex; flex-direction:column; flex:1; min-height:0">
+            <div class="map-modebar">
+              <button class="server-tab active" id="mapModeBlue" onclick="setMapMode('bluemap')">🗺 BlueMap</button>
+              <button class="server-tab" id="mapModeDyn" onclick="setMapMode('dynmap')">🗺 Dynmap</button>
+              <input class="map-url-input" id="mapUrlInput" placeholder="http://localhost:8100"
+                onkeydown="if(event.key==='Enter')applyMapUrl()" style="pointer-events:all">
+              <button class="server-tab" onclick="applyMapUrl()">Load</button>
+              <button class="server-tab" onclick="openMapExternal()" title="Open in browser">↗</button>
+            </div>
+            <div id="mapCanvasWrap">
+              <iframe id="mapFrame" title="Server Map"></iframe>
+              <div class="map-empty" id="mapEmpty">Pick BlueMap or Dynmap, set the URL, and click Load.</div>
+            </div>
           </div>
-          <div id="mapCanvasWrap">
-            <iframe id="mapFrame" title="Server Map"></iframe>
-            <div class="map-empty" id="mapEmpty">Pick BlueMap or Dynmap, set the URL, and click Load.</div>
+          <!-- Terraria world map (rendered from the .wld) -->
+          <div id="mapTerraria" style="display:none; flex-direction:column; flex:1; min-height:0">
+            <div class="map-modebar">
+              <button class="server-tab" id="tMapRenderBtn" onclick="renderTerrariaMap()">🗺 Render map</button>
+              <label class="tmap-auto" title="Auto-refresh while the server runs">
+                <input type="checkbox" id="tMapAuto" onchange="toggleTerrariaMapAuto()"> auto
+              </label>
+              <button class="server-tab" onclick="tMapZoom(1.25)" title="Zoom in">＋</button>
+              <button class="server-tab" onclick="tMapZoom(0.8)" title="Zoom out">－</button>
+              <button class="server-tab" onclick="tMapFit()" title="Fit to view">Fit</button>
+              <span id="tMapInfo" style="opacity:.7; font-size:11px; margin-left:4px"></span>
+              <button class="server-tab" style="margin-left:auto" onclick="tMapOpenExternal()" title="Open full image">↗</button>
+            </div>
+            <div id="tMapWrap">
+              <img id="tMapImg" alt="" draggable="false">
+              <div class="map-empty" id="tMapEmpty">Click <b>Render map</b> to generate a map of your world.</div>
+            </div>
           </div>
         </div>
 

@@ -3356,6 +3356,56 @@ ipcMain.handle('tml-browse-mods', async (e, { query = '', sort = 'downloads', li
   } catch (err) { return { ok: false, error: err.message }; }
 });
 
+// ── Terraria world map ──────────────────────────────────────────────────────────
+// Render the server's world (.wld) to a PNG in an isolated utilityProcess (a large
+// world expands to ~20M tile objects transiently — kept out of the main process).
+function findTerrariaWorldFile(server) {
+  const dir = path.join(server.installDir, 'Worlds');
+  try {
+    const f = fs.readdirSync(dir)
+      .filter(n => /\.wld$/i.test(n))
+      .map(n => ({ n, t: fs.statSync(path.join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.t - a.t)[0];
+    return f ? path.join(dir, f.n) : null;
+  } catch (e) { return null; }
+}
+function renderTerrariaMapFile(wldPath, outPath) {
+  return new Promise((resolve, reject) => {
+    const { utilityProcess } = require('electron');
+    let done = false;
+    // The worker is asarUnpack'd, so point at its real on-disk path (app.asar.unpacked).
+    let workerPath = path.join(__dirname, 'terraria-map-worker.js');
+    if (workerPath.includes('app.asar') && !workerPath.includes('app.asar.unpacked')) {
+      workerPath = workerPath.replace('app.asar', 'app.asar.unpacked');
+    }
+    const child = utilityProcess.fork(workerPath, [], { stdio: 'ignore' });
+    const finish = (fn) => { if (done) return; done = true; clearTimeout(timer); try { child.kill(); } catch (e) {} fn(); };
+    const timer = setTimeout(() => finish(() => reject(new Error('Map render timed out (world too large?)'))), 120000);
+    child.on('message', m => finish(() => m && m.ok ? resolve(m) : reject(new Error((m && m.error) || 'render failed'))));
+    child.on('exit', code => { if (!done) { done = true; clearTimeout(timer); reject(new Error(`Map renderer exited (${code})`)); } });
+    child.postMessage({ wldPath, outPath });
+  });
+}
+ipcMain.handle('terraria-render-map', async (e, serverId) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const wld = findTerrariaWorldFile(server);
+  if (!wld) return { ok: false, error: 'No world found yet — start the server once to generate the world, then render the map.' };
+  const outPath = path.join(server.installDir, 'omnex-map.png');
+  try {
+    const info = await renderTerrariaMapFile(wld, outPath);
+    return { ok: true, path: outPath, mtime: Date.now(), width: info.width, height: info.height, name: info.name || path.basename(wld, '.wld') };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+// Return a previously-rendered map (if any) so the tab can show it without re-rendering.
+ipcMain.handle('terraria-map-info', (e, serverId) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { exists: false };
+  const p = path.join(server.installDir, 'omnex-map.png');
+  try { const st = fs.statSync(p); return { exists: true, path: p, mtime: st.mtimeMs, name: path.basename(findTerrariaWorldFile(server) || '', '.wld') || null }; }
+  catch (e) { return { exists: false }; }
+});
+
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 const SETTINGS_FILE = path.join(USER_DATA, 'settings.json');
