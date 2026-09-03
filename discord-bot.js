@@ -10,6 +10,7 @@
 // enforced in main.js via the `isAllowed` callback.
 
 const https = require('https');
+const fs = require('fs');
 let WebSocket = null;
 try { WebSocket = require('ws'); } catch (e) { WebSocket = null; }
 
@@ -24,7 +25,7 @@ const COMMANDS = [
   { name: 'stop',    description: "Stop this channel's server",    type: 1 },
   { name: 'restart', description: "Restart this channel's server", type: 1 },
   { name: 'backup',  description: "Back up this channel's server", type: 1 },
-  { name: 'map',     description: "Show this channel's server map link", type: 1 },
+  { name: 'map',     description: "View this channel's server map (image for Terraria, link for Minecraft)", type: 1 },
   { name: 'commands', description: 'List every Omnex bot command', type: 1 },
   { name: 'serverid', description: '(admin) Show a server\'s ID', type: 1, options: [
       { name: 'server', description: 'Server name', type: 3, required: true, autocomplete: true } ] },
@@ -324,10 +325,25 @@ class DiscordBot {
       if (target === 'ambiguous') return reply('⚠️ More than one server is linked to this channel. Link each to its own channel with `/link`.', true);
       if (!target) return reply("⚠️ This channel isn't linked to a server. An admin can link it with `/link server:<name>`.", true);
 
-      // ── Public read-only (status/map) ──
-      if (name === 'status' || name === 'map') {
+      // ── Public read-only (status) ──
+      if (name === 'status') {
         await defer(false);
-        const res = name === 'status' ? await D.runAction(target.id, 'status', userName) : await D.getMapLink(target.id);
+        const res = await D.runAction(target.id, 'status', userName);
+        return edit(res.message);
+      }
+
+      // ── Public read-only (map) ──
+      if (name === 'map') {
+        await defer(false);
+        // Terraria: render the world and upload the image so anyone can view it here.
+        const img = D.getMapImage ? await D.getMapImage(target.id) : null;
+        if (img && img.ok) {
+          try { await this._editOriginalWithImage(d, img.path, `🗺 **${img.name}** — Terraria world map`); return; }
+          catch (e) { return edit('❌ Could not upload the map image.'); }
+        }
+        if (img && img.message) return edit(img.message);
+        // Minecraft (and everything else): fall back to the link/text.
+        const res = await D.getMapLink(target.id);
         return edit(res.message);
       }
 
@@ -360,6 +376,48 @@ class DiscordBot {
       });
       req.on('error', reject);
       if (data) req.write(data);
+      req.end();
+    });
+  }
+
+  // Edit the deferred interaction response to include an image attachment (multipart).
+  _editOriginalWithImage(d, filePath, content) {
+    const fileBuf = fs.readFileSync(filePath);
+    const filename = 'world-map.png';
+    const boundary = '----Omnex' + Date.now().toString(16);
+    const payload = JSON.stringify({ content, attachments: [{ id: 0, filename }] });
+    const head = Buffer.from(
+      `--${boundary}\r\n` +
+      'Content-Disposition: form-data; name="payload_json"\r\n' +
+      'Content-Type: application/json\r\n\r\n' +
+      payload + '\r\n' +
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="files[0]"; filename="${filename}"\r\n` +
+      'Content-Type: image/png\r\n\r\n', 'utf8');
+    const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+    const body = Buffer.concat([head, fileBuf, tail]);
+    return this._restRaw('PATCH', `/webhooks/${this.appId}/${d.token}/messages/@original`, body, `multipart/form-data; boundary=${boundary}`);
+  }
+
+  // Like _rest but sends a raw Buffer body with a custom Content-Type (for file uploads).
+  _restRaw(method, path, bodyBuf, contentType) {
+    return new Promise((resolve, reject) => {
+      let u; try { u = new URL(API + path); } catch (e) { return reject(new Error('bad path')); }
+      const headers = {
+        'Authorization': 'Bot ' + this.token,
+        'User-Agent': 'Omnex (https://github.com/KOBRA1325/omnex, 1.0)',
+        'Content-Type': contentType,
+        'Content-Length': bodyBuf.length,
+      };
+      const req = https.request({ method, hostname: u.hostname, path: u.pathname + u.search, headers }, res => {
+        let buf = ''; res.on('data', c => buf += c);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) { try { resolve(buf ? JSON.parse(buf) : {}); } catch (e) { resolve({}); } }
+          else reject(new Error('HTTP ' + res.statusCode + (buf ? ' ' + buf.slice(0, 140) : '')));
+        });
+      });
+      req.on('error', reject);
+      req.write(bodyBuf);
       req.end();
     });
   }

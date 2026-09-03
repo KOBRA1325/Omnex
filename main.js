@@ -3802,6 +3802,22 @@ function discordResolveServerRef(ref) {
 }
 
 // /map — the server's live map link (BlueMap by default). Minecraft only.
+// /map for Terraria: render the world to a PNG so the bot can upload it to the
+// channel. Returns { ok:true, path, name } on success, or { ok:false, message? }
+// (no message → not a Terraria server, let the caller fall back to the link).
+async function discordGetMapImage(serverId) {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s) return { ok: false, message: '⚠️ Server not found.' };
+  if (s.game !== 'Terraria') return { ok: false };
+  const wld = findTerrariaWorldFile(s);
+  if (!wld) return { ok: false, message: '🗺 No world yet — start the server once to generate the world, then try `/map` again.' };
+  const outPath = path.join(s.installDir, 'omnex-map.png');
+  try {
+    const info = await renderTerrariaMapFile(wld, outPath);
+    return { ok: true, path: outPath, name: info.name || s.name, width: info.width, height: info.height };
+  } catch (err) { return { ok: false, message: '❌ Could not render the map: ' + err.message }; }
+}
+
 async function discordGetMapLink(serverId) {
   const s = appData.servers.find(x => x.id === serverId);
   if (!s) return { message: '⚠️ Server not found.' };
@@ -3911,6 +3927,7 @@ function getDiscordBot() {
       listServers: () => appData.servers.map(s => ({ id: s.id, name: s.name, game: s.game })),
       listCreatableGames: () => Object.keys(GAME_DEFAULT_PORTS).filter(g => !(GAME_DEFS[g] && GAME_DEFS[g].type === 'import')),
       getMapLink: (serverId) => discordGetMapLink(serverId),
+      getMapImage: (serverId) => discordGetMapImage(serverId),
       linkChannel: (channelId, ref, adminPassword) => discordLinkChannel(channelId, ref, adminPassword),
       accountChange: (action, targetId, scope, ctxServerId) => discordAccountChange(action, targetId, scope, ctxServerId),
       createServer: (game, name, password, userName, createKey) => discordCreateServer(game, name, password, userName, createKey),
