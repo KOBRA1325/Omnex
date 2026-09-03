@@ -287,7 +287,8 @@ const ACTIVITY_META = {
 function activityRowHtml(entry) {
   const m = ACTIVITY_META[entry.kind] || { icon: '•', cls: '' };
   const time = new Date(entry.ts || Date.now()).toLocaleTimeString('en-US', { hour12: false });
-  const head = entry.player
+  const isMc = ((getActive() || {}).game === 'Minecraft');
+  const head = (entry.player && isMc)
     ? `<img class="act-head" src="https://mc-heads.net/avatar/${encodeURIComponent(entry.player)}/24" onerror="this.style.display='none'">`
     : `<span class="act-icon-fallback">${m.icon}</span>`;
   return `<div class="activity-row ${m.cls}">
@@ -312,7 +313,9 @@ async function loadActivity(id) {
   try { items = await window.nexus.getActivity(id); } catch(e) {}
   if (id !== activeId) return;
   if (!items || !items.length) {
-    feed.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No activity yet — it\'ll fill up as players join, die, earn advancements, and chat.</div>';
+    const isMc = ((servers.find(sv => sv.id === id) || {}).game === 'Minecraft');
+    const detail = isMc ? 'players join, die, earn advancements, and chat' : 'players join, leave, chat, and die';
+    feed.innerHTML = `<div class="empty-msg-sm" style="padding:12px">No activity yet — it'll fill up as ${detail}.</div>`;
     return;
   }
   feed.innerHTML = items.map(activityRowHtml).join('');
@@ -1100,12 +1103,12 @@ async function selectServer(id) {
   const isTerraria = !!(s && s.game === 'Terraria');
   const tabs = document.getElementById('serverTabs');
   if (tabs) tabs.style.display = (isMc || isFs || isTerraria) ? 'flex' : 'none';
-  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = isMc ? '' : 'none';
+  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria) ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = isMc ? '' : 'none';
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
-  if (isMc) loadActivity(id);
+  if (isMc || isTerraria) loadActivity(id);
   const chatOut = document.getElementById('chatOutput');
   if (chatOut) chatOut.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No chat yet.</div>';
   try {

@@ -6121,6 +6121,9 @@ function parsePlayerEvent(serverId, line) {
   if (!server) return;
   if (!server.players) server.players = [];
 
+  // Terraria/tModLoader have their own console formats.
+  if (server.game === 'Terraria') { parseTerrariaEvent(serverId, line); return; }
+
   // Minecraft join: "PlayerName joined the game"
   const joinMatch = line.match(/^([A-Za-z0-9_]+) joined the game/i) ||
                     line.match(/\[Server thread\/INFO\].*?: ([A-Za-z0-9_]+) joined the game/i) ||
@@ -6179,6 +6182,62 @@ function parsePlayerEvent(serverId, line) {
   parseMinecraftActivity(serverId, line);
   const chatM = stripLogPrefix(line).match(/^<([A-Za-z0-9_]{1,16})>\s(.+)$/);
   if (chatM) recordActivity(serverId, 'chat', `${chatM[1]}: ${chatM[2]}`, chatM[1]);
+}
+
+// ── Terraria / tModLoader activity parsing ──────────────────────────────────────
+// The dedicated server prints: "<Name> message" (chat), "Name has joined." /
+// "Name has left." (connect events), and broadcasts death messages. Names may
+// contain spaces, so join/leave anchor on the fixed suffix and chat is matched
+// first (chat lines always start with "<").
+const TERRARIA_DEATH_RE = new RegExp(
+  '^(.{1,32}?) (?:' +
+  'was (?:slain|murdered|eviscerated|dissected|destroyed|slaughtered|snapped|stomped|skewered|impaled|extinguished|dismembered|flattened|devoured|discombobulated|dehydrated|electrocuted|shattered|crushed|inhaled|absorbed|torn|licked|incinerated|cursed|broke) (?:by|in half) .+' +
+  "|(?:fell to (?:their|his|her) death|didn't have enough health|drowned|got dungeon guardian'd|couldn't take the heat|forgot to breathe|didn't watch (?:their|his|her) step|was slain\\.\\.\\.))" +
+  '\\.?$', 'i');
+function parseTerrariaEvent(serverId, line) {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server) return;
+  if (!server.players) server.players = [];
+  const l = line.trim();
+  if (!l) return;
+
+  // Chat: "<Name> message" (checked first — join/leave never start with "<").
+  const cm = l.match(/^<([^>]{1,32})>\s?(.+)$/);
+  if (cm) { recordActivity(serverId, 'chat', `${cm[1]}: ${cm[2]}`, cm[1]); return; }
+
+  // Join: "Name has joined."
+  const jm = l.match(/^(.{1,32}?) has joined\.?$/);
+  if (jm) {
+    const name = jm[1];
+    if (!server.players.some(p => mcPlayerName(p) === name)) {
+      server.players.push({ name, joinedAt: Date.now(), health: null });
+      notify('playerJoin', { serverId, title: `➕ ${name} joined ${server.name}`, body: `${name} joined. ${server.players.length} online.` });
+      recordActivity(serverId, 'join', `${name} joined`, name);
+    }
+    trackPlayers(serverId, server.players.map(mcPlayerName));
+    emit('players-updated', { serverId, players: server.players });
+    return;
+  }
+
+  // Leave: "Name has left."
+  const lm = l.match(/^(.{1,32}?) has left\.?$/);
+  if (lm) {
+    const name = lm[1];
+    const was = server.players.some(p => mcPlayerName(p) === name);
+    server.players = server.players.filter(p => mcPlayerName(p) !== name);
+    if (was) {
+      noteLeave(serverId);
+      notify('playerLeave', { serverId, title: `➖ ${name} left ${server.name}`, body: `${name} left. ${server.players.length} online.` });
+      recordActivity(serverId, 'leave', `${name} left`, name);
+    }
+    trackPlayers(serverId, server.players.map(mcPlayerName));
+    emit('players-updated', { serverId, players: server.players });
+    return;
+  }
+
+  // Deaths (best-effort — Terraria has many phrasings).
+  const dm = l.match(TERRARIA_DEATH_RE);
+  if (dm) { recordActivity(serverId, 'death', l, dm[1]); return; }
 }
 
 // Minecraft-only: parse a `data get entity <name> Health|Pos` reply and update
