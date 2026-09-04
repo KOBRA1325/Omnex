@@ -4117,20 +4117,27 @@ ipcMain.handle('start-remote-access', async (e, port) => {
         req.on('end', () => {
           res.setHeader('Content-Type', 'application/json');
           const ip = remoteClientIp(req);
-          const rec = remoteLoginFails.get(ip);
-          if (rec && rec.lockUntil > Date.now()) {
-            res.statusCode = 429;
-            return res.end(JSON.stringify({ ok: false, error: `Too many attempts. Try again in ${Math.ceil((rec.lockUntil - Date.now()) / 60000)} min.` }));
+          // The owner at the Omnex machine (localhost) is never rate-limited, so a
+          // mistyped password on the host can't lock them out.
+          const isLocal = /^(::1$|::ffff:127\.|127\.)/.test(ip);
+          if (!isLocal) {
+            const rec = remoteLoginFails.get(ip);
+            if (rec && rec.lockUntil > Date.now()) {
+              res.statusCode = 429;
+              return res.end(JSON.stringify({ ok: false, error: `Too many attempts. Try again in ${Math.ceil((rec.lockUntil - Date.now()) / 60000)} min.` }));
+            }
           }
           let pw = ''; try { pw = String(JSON.parse(body).password || ''); } catch (e) {}
           const gate = String(appSettings.discordCreatePassword || '');
           if (!gate) { res.statusCode = 403; return res.end(JSON.stringify({ ok: false, error: 'Remote access is locked. Set an admin password in Omnex → Settings → Discord → Bot control first.' })); }
           if (pw !== gate) {
-            const r = remoteLoginFails.get(ip) || { fails: 0, lockUntil: 0 };
-            r.fails++;
             let msg = 'Incorrect password.';
-            if (r.fails >= REMOTE_MAX_FAILS) { r.lockUntil = Date.now() + REMOTE_LOCK_MS; r.fails = 0; msg = 'Too many attempts — locked for 5 minutes.'; }
-            remoteLoginFails.set(ip, r);
+            if (!isLocal) {
+              const r = remoteLoginFails.get(ip) || { fails: 0, lockUntil: 0 };
+              r.fails++;
+              if (r.fails >= REMOTE_MAX_FAILS) { r.lockUntil = Date.now() + REMOTE_LOCK_MS; r.fails = 0; msg = 'Too many attempts — locked for 5 minutes.'; }
+              remoteLoginFails.set(ip, r);
+            }
             res.statusCode = 401;
             return res.end(JSON.stringify({ ok: false, error: msg }));
           }
@@ -4229,10 +4236,20 @@ ipcMain.handle('stop-remote-access', () => {
   return { ok: true };
 });
 
-ipcMain.handle('get-remote-status', () => ({
-  running: !!remoteServer,
-  port:    remotePort,
-}));
+ipcMain.handle('get-remote-status', () => {
+  const now = Date.now();
+  let locked = 0; for (const r of remoteLoginFails.values()) if (r.lockUntil > now) locked++;
+  return { running: !!remoteServer, port: remotePort, https: !!appSettings.remoteHttps, lockedOut: locked, sessions: remoteSessions.size };
+});
+
+// Manual escape hatch: clear all brute-force lockouts (and, if requested, sign
+// everyone out) — so a locked-out user can be let back in immediately.
+ipcMain.handle('clear-remote-lockouts', (e, alsoSignOut) => {
+  const n = remoteLoginFails.size;
+  remoteLoginFails.clear();
+  if (alsoSignOut) remoteSessions.clear();
+  return { ok: true, cleared: n };
+});
 
 // The login screen — shown until the visitor enters the Omnex admin password.
 function generateRemoteLogin(noPassword) {

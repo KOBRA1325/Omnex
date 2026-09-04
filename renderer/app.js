@@ -3208,6 +3208,13 @@ async function toggleRemoteHttps(btn) {
   showToast(next ? '🔒' : '🌐', next ? 'HTTPS enabled — restart devices may need to re-accept the cert' : 'HTTPS disabled');
 }
 
+async function resetRemoteLockouts() {
+  try {
+    const r = await window.nexus.clearRemoteLockouts(false);
+    showToast('🔓', (r && r.cleared) ? `Cleared ${r.cleared} lockout${r.cleared===1?'':'s'}` : 'No active lockouts');
+  } catch(e) { showToast('❌', e.message); }
+}
+
 
 
 // ── Steam Guard alert banner ─────────────────────────────────────────────────

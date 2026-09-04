@@ -120,6 +120,7 @@ contextBridge.exposeInMainWorld('nexus', {
   startRemoteAccess: (port) => ipcRenderer.invoke('start-remote-access', port),
   stopRemoteAccess:  ()     => ipcRenderer.invoke('stop-remote-access'),
   getRemoteStatus:   ()     => ipcRenderer.invoke('get-remote-status'),
+  clearRemoteLockouts: (alsoSignOut) => ipcRenderer.invoke('clear-remote-lockouts', alsoSignOut),
 
   // Settings
   getSettings:        ()         => ipcRenderer.invoke('get-settings'),
