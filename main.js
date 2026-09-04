@@ -4049,6 +4049,30 @@ ipcMain.handle('delete-template', (e, id) => {
 let remoteServer = null;
 let remotePort   = 54321;
 
+// Login sessions for the remote panel — gated by the Omnex admin password
+// (discordCreatePassword). A valid login gets a random token cookie good for 7 days.
+const remoteSessions = new Map(); // token -> expiry ms
+const REMOTE_TTL = 7 * 24 * 3600 * 1000;
+function remoteMakeToken() { return require('crypto').randomBytes(24).toString('hex'); }
+function remoteParseCookies(req) {
+  const out = {}; const h = req.headers.cookie; if (!h) return out;
+  h.split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) out[p.slice(0, i).trim()] = p.slice(i + 1).trim(); });
+  return out;
+}
+function remoteCheckAuth(req) {
+  const tok = remoteParseCookies(req).omnex_remote;
+  if (!tok) return false;
+  const exp = remoteSessions.get(tok);
+  if (!exp) return false;
+  if (Date.now() > exp) { remoteSessions.delete(tok); return false; }
+  return true;
+}
+function remoteAccentTokens() {
+  const accent = String(appSettings.accentColor || '#00e5ff').replace('#', '');
+  const hex = /^[0-9a-f]{6}$/i.test(accent) ? accent : '00e5ff';
+  return { m: hex, r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) };
+}
+
 ipcMain.handle('start-remote-access', async (e, port) => {
   if (remoteServer) return { ok: false, error: 'Already running' };
   remotePort = port || 54321;
@@ -4058,49 +4082,83 @@ ipcMain.handle('start-remote-access', async (e, port) => {
 
     remoteServer = http.createServer((req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Content-Type', 'application/json');
+      const url = (req.url || '').split('?')[0];
 
-      if (req.url === '/api/servers') {
-        const data = appData.servers.map(s => {
-          const online = !!serverProcesses[s.id];
-          return {
-            id: s.id, name: s.name, game: s.game,
-            status: online ? 'online' : 'offline',
-            port: s.port,
-            players: online ? (s.players || []).map(mcPlayerName).filter(Boolean) : [],
-            startedAt: online ? (s.startedAt || null) : null,
-            mcVersion: s.mcVersion, mcType: s.mcType, terrariaType: s.terrariaType,
-            icon: s.customIcon || '', fallback: s.fallback || '', color: s.color || '',
-          };
-        });
-        res.end(JSON.stringify({ servers: data, accent: appSettings.accentColor || '#00e5ff', version: app.getVersion() }));
-      } else if (req.url === '/icon.png') {
+      // Public: the logo (needed on the login screen before auth).
+      if (url === '/icon.png') {
         try {
           const buf = fs.readFileSync(path.join(__dirname, 'assets', 'icon.png'));
           res.setHeader('Content-Type', 'image/png'); res.end(buf);
         } catch (e) { res.statusCode = 404; res.end(''); }
-      } else if (req.url === '/api/status') {
-        res.end(JSON.stringify({ ok: true, version: app.getVersion(), servers: appData.servers.length }));
-      } else if (req.method === 'POST' && (req.url === '/api/action' || req.url === '/')) {
-        let body = '';
-        req.on('data', d => body += d);
-        req.on('end', () => {
-          try {
-            const { action, serverId } = JSON.parse(body);
-            if (action === 'start')   startServerById(serverId).then(() => res.end(JSON.stringify({ ok: true })));
-            else if (action === 'stop') killServer(serverId).then(() => res.end(JSON.stringify({ ok: true })));
-            else if (action === 'restart') {
-              killServer(serverId).then(() => setTimeout(() => startServerById(serverId), 2000));
-              res.end(JSON.stringify({ ok: true }));
-            } else res.end(JSON.stringify({ ok: false, error: 'Unknown action' }));
-          } catch(e) { res.end(JSON.stringify({ ok: false, error: e.message })); }
-        });
-      } else {
-        // Serve a simple mobile-friendly dashboard page
-        res.setHeader('Content-Type', 'text/html');
-        const html = generateRemoteDashboard();
-        res.end(html);
+        return;
       }
+
+      // Login: check the password against the Omnex admin password.
+      if (url === '/api/login' && req.method === 'POST') {
+        let body = ''; req.on('data', d => body += d);
+        req.on('end', () => {
+          res.setHeader('Content-Type', 'application/json');
+          let pw = ''; try { pw = String(JSON.parse(body).password || ''); } catch (e) {}
+          const gate = String(appSettings.discordCreatePassword || '');
+          if (!gate) { res.statusCode = 403; return res.end(JSON.stringify({ ok: false, error: 'Remote access is locked. Set an admin password in Omnex → Settings → Discord → Bot control first.' })); }
+          if (pw !== gate) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, error: 'Incorrect password.' })); }
+          const token = remoteMakeToken();
+          remoteSessions.set(token, Date.now() + REMOTE_TTL);
+          res.setHeader('Set-Cookie', `omnex_remote=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(REMOTE_TTL / 1000)}`);
+          res.end(JSON.stringify({ ok: true }));
+        });
+        return;
+      }
+      if (url === '/api/logout' && req.method === 'POST') {
+        const tok = remoteParseCookies(req).omnex_remote; if (tok) remoteSessions.delete(tok);
+        res.setHeader('Set-Cookie', 'omnex_remote=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+        res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      const authed = remoteCheckAuth(req);
+
+      // All /api/* endpoints require a valid session.
+      if (url.startsWith('/api/')) {
+        res.setHeader('Content-Type', 'application/json');
+        if (!authed) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, error: 'unauthorized' })); }
+        if (url === '/api/servers') {
+          const data = appData.servers.map(s => {
+            const online = !!serverProcesses[s.id];
+            return {
+              id: s.id, name: s.name, game: s.game,
+              status: online ? 'online' : 'offline',
+              port: s.port,
+              players: online ? (s.players || []).map(mcPlayerName).filter(Boolean) : [],
+              startedAt: online ? (s.startedAt || null) : null,
+              mcVersion: s.mcVersion, mcType: s.mcType, terrariaType: s.terrariaType,
+              icon: s.customIcon || '', fallback: s.fallback || '', color: s.color || '',
+            };
+          });
+          res.end(JSON.stringify({ servers: data, accent: appSettings.accentColor || '#00e5ff', version: app.getVersion() }));
+        } else if (url === '/api/status') {
+          res.end(JSON.stringify({ ok: true, version: app.getVersion(), servers: appData.servers.length }));
+        } else if (url === '/api/action' && req.method === 'POST') {
+          let body = '';
+          req.on('data', d => body += d);
+          req.on('end', () => {
+            try {
+              const { action, serverId } = JSON.parse(body);
+              if (action === 'start')   startServerById(serverId).then(() => res.end(JSON.stringify({ ok: true })));
+              else if (action === 'stop') killServer(serverId).then(() => res.end(JSON.stringify({ ok: true })));
+              else if (action === 'restart') {
+                killServer(serverId).then(() => setTimeout(() => startServerById(serverId), 2000));
+                res.end(JSON.stringify({ ok: true }));
+              } else res.end(JSON.stringify({ ok: false, error: 'Unknown action' }));
+            } catch (e) { res.end(JSON.stringify({ ok: false, error: e.message })); }
+          });
+        } else { res.statusCode = 404; res.end(JSON.stringify({ ok: false, error: 'not found' })); }
+        return;
+      }
+
+      // Any page: the dashboard when authed, otherwise the login screen.
+      res.setHeader('Content-Type', 'text/html');
+      res.end(authed ? generateRemoteDashboard() : generateRemoteLogin(!String(appSettings.discordCreatePassword || '')));
     });
 
     remoteServer.listen(remotePort);
@@ -4124,6 +4182,7 @@ ipcMain.handle('start-remote-access', async (e, port) => {
 
 ipcMain.handle('stop-remote-access', () => {
   if (remoteServer) { remoteServer.close(); remoteServer = null; }
+  remoteSessions.clear(); // invalidate all logins when the panel is turned off
   return { ok: true };
 });
 
@@ -4131,6 +4190,74 @@ ipcMain.handle('get-remote-status', () => ({
   running: !!remoteServer,
   port:    remotePort,
 }));
+
+// The login screen — shown until the visitor enters the Omnex admin password.
+function generateRemoteLogin(noPassword) {
+  const { m, r, g, b } = remoteAccentTokens();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Omnex Remote · Sign in</title>
+<link rel="icon" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0a0c10;--surface:#0f1218;--panel:#141820;--border:#1e2535;
+    --accent:#${m};--accent-rgb:${r},${g},${b};--red:#ff3b5c;
+    --text:#c8d4e8;--text-dim:#5a6a80;--text-bright:#e8f0ff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Exo 2',system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
+    background-image:radial-gradient(700px 460px at 50% -10%, rgba(var(--accent-rgb),.08), transparent 60%)}
+  .box{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--border);border-radius:16px;
+    padding:30px 26px;box-shadow:0 18px 60px rgba(0,0,0,.5);text-align:center}
+  .logo{width:56px;height:56px;border-radius:13px;box-shadow:0 0 20px rgba(var(--accent-rgb),.4);margin-bottom:14px}
+  h1{color:var(--accent);font-size:24px;font-weight:800;letter-spacing:3px;text-shadow:0 0 16px rgba(var(--accent-rgb),.4)}
+  .sub{color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10.5px;letter-spacing:1.5px;margin-top:5px;margin-bottom:24px}
+  input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:9px;color:var(--text-bright);
+    font-family:'Exo 2',sans-serif;font-size:15px;padding:12px 14px;outline:none;transition:border-color .15s}
+  input:focus{border-color:rgba(var(--accent-rgb),.6);box-shadow:0 0 0 3px rgba(var(--accent-rgb),.12)}
+  button{width:100%;margin-top:12px;background:rgba(var(--accent-rgb),.14);border:1px solid var(--accent);color:var(--accent);
+    font-family:'Exo 2',sans-serif;font-weight:700;font-size:14px;letter-spacing:1px;padding:12px;border-radius:9px;cursor:pointer;transition:filter .15s}
+  button:hover{filter:brightness(1.2)} button:disabled{opacity:.5;cursor:default}
+  .err{color:var(--red);font-size:12px;margin-top:12px;min-height:16px;font-family:'Share Tech Mono',monospace}
+  .note{color:var(--text-dim);font-size:12px;line-height:1.6;margin-top:6px}
+  .lock{font-size:15px}
+</style>
+</head>
+<body>
+<form class="box" onsubmit="return login(event)">
+  <img class="logo" src="/icon.png" alt="" onerror="this.style.display='none'">
+  <h1>OMNEX</h1>
+  <div class="sub">REMOTE ACCESS · SIGN IN</div>
+  ${noPassword
+    ? `<div class="note"><div class="lock">🔒</div>Remote access is locked.<br>Set an <b>admin password</b> in Omnex →<br>Settings → Discord → Bot control, then reload.</div>`
+    : `<input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" autofocus>
+       <button id="go" type="submit">Sign in</button>
+       <div class="err" id="err"></div>`}
+</form>
+<script>
+  async function login(e){
+    e.preventDefault();
+    const pw=document.getElementById('pw'), go=document.getElementById('go'), err=document.getElementById('err');
+    if(!pw) return false;
+    go.disabled=true; go.textContent='…'; err.textContent='';
+    try{
+      const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw.value})});
+      const d=await r.json();
+      if(d.ok){ location.reload(); return false; }
+      err.textContent=d.error||'Incorrect password.';
+    }catch(_){ err.textContent='Could not reach Omnex.'; }
+    go.disabled=false; go.textContent='Sign in'; pw.value=''; pw.focus();
+    return false;
+  }
+</script>
+</body>
+</html>`;
+}
 
 function generateRemoteDashboard() {
   const accent = appSettings.accentColor || '#00e5ff';
@@ -4239,6 +4366,7 @@ function generateRemoteDashboard() {
     <div class="live">
       <span class="livebadge"><span class="d"></span>LIVE</span>
       <button class="rbtn" id="rbtn" onclick="refresh(true)" title="Refresh">↻</button>
+      <button class="rbtn" onclick="logout()" title="Sign out">⎋</button>
     </div>
   </div>
   <div class="stats" id="stats"></div>
@@ -4314,6 +4442,7 @@ function generateRemoteDashboard() {
     try{ await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,serverId:id})}); }catch(e){}
     setTimeout(()=>{ busy=null; refresh(); }, 2500);
   }
+  async function logout(){ try{ await fetch('/api/logout',{method:'POST'}); }catch(_){} location.reload(); }
   refresh(); setInterval(()=>{ if(!busy) refresh(); }, 4000);
 </script>
 </body>
