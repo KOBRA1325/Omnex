@@ -6005,6 +6005,23 @@ ipcMain.handle('send-command',  async (e,{id,command}) => {
   try { proc.stdin.write(command+'\n'); return { ok:true }; } catch(e) { return { ok:false, error:e.message }; }
 });
 
+// Palworld: broadcast a message to all players. Prefers the REST API /announce
+// (handles spaces), falls back to RCON Broadcast (which needs underscores).
+ipcMain.handle('palworld-broadcast', async (e, { serverId, message }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server || server.game !== 'Palworld') return { ok: false, error: 'Not a Palworld server' };
+  if (!serverProcesses[serverId]) return { ok: false, error: 'Server is not running' };
+  const msg = String(message || '').trim();
+  if (!msg) return { ok: false, error: 'Empty message' };
+  const rest = await palworldRest(server, 'POST', 'announce', { message: msg });
+  if (rest !== null) { log(serverId, 'info', `[Broadcast] ${msg}`); return { ok: true }; }
+  // Fallback: RCON Broadcast (Palworld splits on spaces, so send underscores).
+  const res = await rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, `Broadcast ${msg.replace(/\s+/g, '_')}`);
+  if (res === null) return { ok: false, error: 'Broadcast failed (is the server fully started?)' };
+  log(serverId, 'info', `[Broadcast] ${msg}`);
+  return { ok: true };
+});
+
 // ── RCON (Source protocol) — graceful Palworld shutdown + live player counts ──
 // Connects, authenticates, runs one command, returns the response text.
 // Resolves null on any failure — RCON is best-effort and never blocks a stop.
@@ -6062,11 +6079,15 @@ function configurePalworldRcon(server) {
     if (map.get('RCONEnabled') !== 'True') { map.set('RCONEnabled', 'True'); changed = true; }
     const rconPort = parseInt(String(map.get('RCONPort') || '').replace(/[^0-9]/g, ''), 10) || 25575;
     if (!map.has('RCONPort')) { map.set('RCONPort', String(rconPort)); changed = true; }
+    // Also enable the REST API (Activity player data, live positions, announcements).
+    if (map.get('RESTAPIEnabled') !== 'True') { map.set('RESTAPIEnabled', 'True'); changed = true; }
+    const restPort = parseInt(String(map.get('RESTAPIPort') || '').replace(/[^0-9]/g, ''), 10) || 8212;
+    if (!map.has('RESTAPIPort')) { map.set('RESTAPIPort', String(restPort)); changed = true; }
     let admin = String(map.get('AdminPassword') || '').replace(/^"|"$/g, '');
     if (!admin) {
       admin = 'omnex' + Math.random().toString(36).slice(2, 10);
       map.set('AdminPassword', `"${admin}"`); changed = true;
-      log(server.id, 'dim', 'Enabled RCON with an auto-generated admin password (for graceful shutdown + player counts). You can view/change it in Config → Admin Password.');
+      log(server.id, 'dim', 'Enabled RCON + REST API with an auto-generated admin password (for player data, live map, and graceful shutdown). You can view/change it in Config → Admin Password.');
     }
     if (changed) {
       const tuple = Array.from(map.entries()).map(([k, v]) => `${k}=${v}`).join(',');
@@ -6075,7 +6096,32 @@ function configurePalworldRcon(server) {
     }
     server.rconPort = rconPort;
     server.rconPassword = admin;
+    server.restPort = restPort;
   } catch(e) {}
+}
+
+// Call the Palworld REST API (HTTP Basic auth: user "admin", pw = AdminPassword).
+// Returns parsed JSON, or null on any failure so callers can fall back to RCON.
+function palworldRest(server, method, apiPath, body) {
+  return new Promise((resolve) => {
+    if (!server || !server.rconPassword) return resolve(null);
+    const port = server.restPort || 8212;
+    const data = body != null ? JSON.stringify(body) : null;
+    const auth = 'Basic ' + Buffer.from('admin:' + server.rconPassword).toString('base64');
+    const headers = { 'Authorization': auth, 'Accept': 'application/json' };
+    if (data) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = Buffer.byteLength(data); }
+    const req = http.request({ host: '127.0.0.1', port, method, path: '/v1/api/' + apiPath, headers, timeout: 3000 }, res => {
+      let buf = ''; res.on('data', d => buf += d);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) { try { resolve(buf ? JSON.parse(buf) : {}); } catch (e) { resolve({}); } }
+        else resolve(null);
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    if (data) req.write(data);
+    req.end();
+  });
 }
 
 // Graceful stop: for Palworld with RCON, ask the server to shut down cleanly
@@ -6338,14 +6384,45 @@ async function pollPalworldPlayers(s) {
   if (_playerPollSkip[s.id] > 0) { _playerPollSkip[s.id]--; return; } // backing off after a failure
   _playerPollInFlight.add(s.id);
   try {
-    const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
-    if (res === null) { _playerPollSkip[s.id] = 4; return; } // RCON struggling — ease off ~4 cycles
-    // CSV: header line "name,playeruid,steamid" then one row per player.
-    const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
-    const players = rows.slice(1).map(r => {
-      const c = r.split(',');
-      return { name: (c[0] || '').trim(), steamId: (c[2] || '').trim() };
-    }).filter(p => p.name && p.name.toLowerCase() !== 'name');
+    let players = null;
+    // Prefer the REST API — it also gives player level + live position (for the map).
+    const rest = await palworldRest(s, 'GET', 'players');
+    if (rest && Array.isArray(rest.players)) {
+      players = rest.players.map(p => ({
+        name: (p.name || '').trim(),
+        steamId: String(p.userId || p.steamid || '').replace(/^steam_/, ''),
+        level: p.level != null ? Number(p.level) : null,
+        x: p.location_x != null ? Number(p.location_x) : null,
+        y: p.location_y != null ? Number(p.location_y) : null,
+      })).filter(p => p.name && p.name.toLowerCase() !== 'name');
+    } else {
+      // Fall back to RCON ShowPlayers (name/steamId only).
+      const res = await rconCommand('127.0.0.1', s.rconPort || 25575, s.rconPassword, 'ShowPlayers');
+      if (res === null) { _playerPollSkip[s.id] = 4; return; } // both struggling — ease off ~4 cycles
+      const rows = res.split('\n').map(l => l.trim()).filter(Boolean);
+      players = rows.slice(1).map(r => {
+        const c = r.split(',');
+        return { name: (c[0] || '').trim(), steamId: (c[2] || '').trim() };
+      }).filter(p => p.name && p.name.toLowerCase() !== 'name');
+    }
+    // Detect joins/leaves by diffing against the last poll — but only once we've
+    // seen a baseline for THIS process run (so a (re)start doesn't spam joins).
+    const proc = serverProcesses[s.id];
+    const seeded = s._palPollProc === proc;
+    s._palPollProc = proc;
+    if (seeded) {
+      const prev = new Set((s.players || []).map(p => p.name));
+      const now  = new Set(players.map(p => p.name));
+      for (const p of players) if (!prev.has(p.name)) {
+        recordActivity(s.id, 'join', `${p.name} joined`, p.name);
+        notify('playerJoin', { serverId: s.id, title: `➕ ${p.name} joined ${s.name}`, body: `${p.name} joined. ${players.length} online.` });
+      }
+      for (const nm of prev) if (!now.has(nm)) {
+        recordActivity(s.id, 'leave', `${nm} left`, nm);
+        noteLeave(s.id);
+        notify('playerLeave', { serverId: s.id, title: `➖ ${nm} left ${s.name}`, body: `${nm} left. ${players.length} online.` });
+      }
+    }
     s.players = players;
     checkPlayerDrop(s.id, players.length);
     trackPlayers(s.id, players.map(p => p.name));

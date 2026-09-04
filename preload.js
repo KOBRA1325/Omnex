@@ -167,6 +167,7 @@ contextBridge.exposeInMainWorld('nexus', {
   tmlBrowseMods:         (opts)              => ipcRenderer.invoke('tml-browse-mods', opts),
   terrariaRenderMap:     (serverId)          => ipcRenderer.invoke('terraria-render-map', serverId),
   terrariaMapInfo:       (serverId)          => ipcRenderer.invoke('terraria-map-info', serverId),
+  palworldBroadcast:     (serverId, message) => ipcRenderer.invoke('palworld-broadcast', { serverId, message }),
 
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),

@@ -314,8 +314,10 @@ async function loadActivity(id) {
   try { items = await window.nexus.getActivity(id); } catch(e) {}
   if (id !== activeId) return;
   if (!items || !items.length) {
-    const isMc = ((servers.find(sv => sv.id === id) || {}).game === 'Minecraft');
-    const detail = isMc ? 'players join, die, earn advancements, and chat' : 'players join, leave, chat, and die';
+    const g = (servers.find(sv => sv.id === id) || {}).game;
+    const detail = g === 'Minecraft' ? 'players join, die, earn advancements, and chat'
+      : g === 'Palworld' ? 'players join and leave'
+      : 'players join, leave, chat, and die';
     feed.innerHTML = `<div class="empty-msg-sm" style="padding:12px">No activity yet — it'll fill up as ${detail}.</div>`;
     return;
   }
@@ -376,6 +378,16 @@ async function sendChat() {
   const msg = input.value.trim(); if (!msg) return;
   const s = getActive(); if (!s) return;
   input.value = '';
+  const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+  if (s.game === 'Palworld') {
+    // Palworld can't read chat — this is a one-way broadcast to all players.
+    try {
+      const r = await window.nexus.palworldBroadcast(s.id, msg);
+      if (r && r.ok) appendChat('You (broadcast)', msg, time);
+      else showToast('❌', (r && r.error) || 'Broadcast failed');
+    } catch(e) { showToast('❌', e.message); }
+    return;
+  }
   try { await window.nexus.sendCommand(s.id, `say ${msg}`); } catch(e) {}
 }
 function handleChatKey(e) { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } }
@@ -1101,20 +1113,24 @@ async function selectServer(id) {
   const out = document.getElementById('consoleOutput'); if (out) out.innerHTML = '';
   _consoleBuf = []; // drop any pending lines queued from the previous server
   const s = servers.find(sv => sv.id === id);
-  // Tabs are per-game: Minecraft gets Chat + Map; Terraria gets Map; FS25 gets Web Admin.
+  // Tabs are per-game: Minecraft gets Chat + Map; Terraria gets Map; Palworld gets
+  // Activity + Broadcast; FS25 gets Web Admin.
   const isMc = !!(s && s.game === 'Minecraft');
   const isFs = !!(s && s.game === 'Farming Simulator 25');
   const isTerraria = !!(s && s.game === 'Terraria');
+  const isPal = !!(s && s.game === 'Palworld');
   const tabs = document.getElementById('serverTabs');
-  if (tabs) tabs.style.display = (isMc || isFs || isTerraria) ? 'flex' : 'none';
-  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria) ? '' : 'none';
-  const bChat = document.getElementById('tabBtnChat');  if (bChat)  bChat.style.display  = (isMc || isTerraria) ? '' : 'none';
+  if (tabs) tabs.style.display = (isMc || isFs || isTerraria || isPal) ? 'flex' : 'none';
+  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria || isPal) ? '' : 'none';
+  const bChat = document.getElementById('tabBtnChat');  if (bChat)  { bChat.style.display = (isMc || isTerraria || isPal) ? '' : 'none'; bChat.textContent = isPal ? 'Broadcast' : 'Chat'; }
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
-  if (isMc || isTerraria) loadActivity(id);
+  if (isMc || isTerraria || isPal) loadActivity(id);
   const chatOut = document.getElementById('chatOutput');
-  if (chatOut) chatOut.innerHTML = '<div class="empty-msg-sm" style="padding:12px">No chat yet.</div>';
+  if (chatOut) chatOut.innerHTML = `<div class="empty-msg-sm" style="padding:12px">${isPal ? 'Send an announcement to all players. (Palworld can\'t relay players\' chat back.)' : 'No chat yet.'}</div>`;
+  const chatIn = document.getElementById('chatInput');
+  if (chatIn) chatIn.placeholder = isPal ? 'Broadcast a message to all players…' : 'Send a message to players (say)...';
   try {
     const hist = await window.nexus.getConsole(id);
     if (id === activeId && Array.isArray(hist)) hist.forEach(l => appendLog(l.type, l.text, l.ts));
