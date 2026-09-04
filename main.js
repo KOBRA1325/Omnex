@@ -4064,10 +4064,16 @@ ipcMain.handle('start-remote-access', async (e, port) => {
         const data = appData.servers.map(s => ({
           id: s.id, name: s.name, game: s.game,
           status: serverProcesses[s.id] ? 'online' : 'offline',
-          port: s.port, players: s.players || [],
-          mcVersion: s.mcVersion, mcType: s.mcType,
+          port: s.port, players: (s.players || []).length,
+          mcVersion: s.mcVersion, mcType: s.mcType, terrariaType: s.terrariaType,
+          icon: s.customIcon || '', fallback: s.fallback || '', color: s.color || '',
         }));
-        res.end(JSON.stringify(data));
+        res.end(JSON.stringify({ servers: data, accent: appSettings.accentColor || '#00e5ff', version: app.getVersion() }));
+      } else if (req.url === '/icon.png') {
+        try {
+          const buf = fs.readFileSync(path.join(__dirname, 'assets', 'icon.png'));
+          res.setHeader('Content-Type', 'image/png'); res.end(buf);
+        } catch (e) { res.statusCode = 404; res.end(''); }
       } else if (req.url === '/api/status') {
         res.end(JSON.stringify({ ok: true, version: app.getVersion(), servers: appData.servers.length }));
       } else if (req.method === 'POST' && (req.url === '/api/action' || req.url === '/')) {
@@ -4122,54 +4128,110 @@ ipcMain.handle('get-remote-status', () => ({
 }));
 
 function generateRemoteDashboard() {
-  const servers = appData.servers.map(s => ({
-    id: s.id, name: s.name, game: s.game,
-    status: serverProcesses[s.id] ? 'online' : 'offline',
-    port: s.port, players: s.players || [],
-  }));
+  const accent = appSettings.accentColor || '#00e5ff';
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(accent.replace('#', '')) ? accent.replace('#', '') : '00e5ff';
+  const r = parseInt(m.slice(0, 2), 16), g = parseInt(m.slice(2, 4), 16), b = parseInt(m.slice(4, 6), 16);
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Omnex Remote</title>
+<link rel="icon" href="/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
+  :root{
+    --bg:#0a0c10;--surface:#0f1218;--panel:#141820;--border:#1e2535;
+    --accent:#${m};--accent-rgb:${r},${g},${b};
+    --green:#39ff6e;--red:#ff3b5c;--yellow:#ffd700;
+    --text:#c8d4e8;--text-dim:#5a6a80;--text-bright:#e8f0ff;
+  }
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#0a0c10;color:#c8d4e8;font-family:system-ui,sans-serif;padding:16px}
-  h1{color:#00e5ff;font-size:20px;margin-bottom:4px;letter-spacing:2px}
-  .sub{color:#5a6a80;font-size:12px;margin-bottom:20px}
-  .card{background:#141820;border:1px solid #1e2535;border-radius:10px;padding:14px;margin-bottom:12px}
-  .sname{font-weight:700;font-size:15px;color:#e8f0ff;margin-bottom:4px}
-  .smeta{font-size:11px;color:#5a6a80;margin-bottom:10px}
-  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-  .online{background:#39ff6e}.offline{background:#5a6a80}.crashed{background:#ff3b5c}
-  .btns{display:flex;gap:8px;flex-wrap:wrap}
-  button{padding:8px 16px;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px}
-  .bstart{background:rgba(57,255,110,0.15);color:#39ff6e;border:1px solid #39ff6e}
-  .bstop{background:rgba(255,59,92,0.15);color:#ff3b5c;border:1px solid #ff3b5c}
-  .brestart{background:rgba(255,215,0,0.15);color:#ffd700;border:1px solid #ffd700}
-  .msg{background:rgba(0,229,255,0.08);border:1px solid rgba(0,229,255,0.2);border-radius:6px;padding:10px;font-size:11px;color:#00e5ff;margin-top:8px;display:none}
+  body{background:var(--bg);color:var(--text);font-family:'Exo 2',system-ui,sans-serif;
+    padding:18px 16px 40px;max-width:760px;margin:0 auto;-webkit-font-smoothing:antialiased;min-height:100vh}
+  .hdr{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+  .logo{width:38px;height:38px;border-radius:9px;box-shadow:0 0 14px rgba(var(--accent-rgb),.35)}
+  h1{color:var(--accent);font-size:22px;font-weight:800;letter-spacing:3px;line-height:1;text-shadow:0 0 14px rgba(var(--accent-rgb),.4)}
+  .sub{color:var(--text-dim);font-size:11px;font-family:'Share Tech Mono',monospace;letter-spacing:1px;margin-top:3px}
+  .live{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--green);letter-spacing:1px;opacity:.9}
+  .live .d{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px;box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .card{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--c,var(--accent));
+    border-radius:12px;padding:14px 16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+  .row{display:flex;align-items:center;gap:12px}
+  .ico{width:40px;height:40px;border-radius:9px;background:var(--surface);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0}
+  .info{flex:1;min-width:0}
+  .sname{font-weight:700;font-size:15px;color:var(--text-bright);display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dot{width:8px;height:8px;border-radius:50%;margin-right:8px;flex-shrink:0}
+  .dot.online{background:var(--green);box-shadow:0 0 8px rgba(57,255,110,.6)}
+  .dot.offline{background:var(--text-dim)}.dot.crashed{background:var(--red)}
+  .smeta{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-dim);margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:4px 9px;border-radius:5px;flex-shrink:0}
+  .stat.online{color:var(--green);background:rgba(57,255,110,.12)}
+  .stat.offline{color:var(--text-dim);background:rgba(90,106,128,.12)}
+  .stat.crashed{color:var(--red);background:rgba(255,59,92,.12)}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
+  button.b{padding:9px 18px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px;
+    font-family:'Exo 2',sans-serif;transition:filter .15s;background:transparent}
+  button.b:active{filter:brightness(1.3)}
+  button.b:disabled{opacity:.5;cursor:default}
+  .bstart{color:var(--green);border:1px solid var(--green);background:rgba(57,255,110,.12)}
+  .bstop{color:var(--red);border:1px solid var(--red);background:rgba(255,59,92,.12)}
+  .brestart{color:var(--yellow);border:1px solid var(--yellow);background:rgba(255,215,0,.12)}
+  .empty{color:var(--text-dim);font-size:13px;text-align:center;padding:40px 0}
+  .ftr{color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10px;text-align:center;margin-top:22px;opacity:.6}
 </style>
 </head>
 <body>
-<h1>OMNEX</h1>
-<div class="sub">Remote Access - Local Network</div>
-${servers.map(s => `
-<div class="card">
-  <div class="sname"><span class="dot ${s.status}"></span>${s.name}</div>
-  <div class="smeta">${s.game} · Port ${s.port} · ${s.players.length} player${s.players.length !== 1 ? 's' : ''}</div>
-  <div class="btns">
-    ${s.status !== 'online' ? `<button class="bstart" onclick="act('start','${s.id}',this)">▶ Start</button>` : ''}
-    ${s.status === 'online' ? `<button class="bstop" onclick="act('stop','${s.id}',this)">⏹ Stop</button>` : ''}
-    ${s.status === 'online' ? `<button class="brestart" onclick="act('restart','${s.id}',this)">🔄 Restart</button>` : ''}
-  </div>
-</div>`).join('')}
+<div class="hdr">
+  <img class="logo" src="/icon.png" alt="" onerror="this.style.display='none'">
+  <div><h1>OMNEX</h1><div class="sub">REMOTE ACCESS · LOCAL NETWORK</div></div>
+  <div class="live"><span class="d"></span>LIVE</div>
+</div>
+<div id="list"><div class="empty">Loading…</div></div>
+<div class="ftr" id="ftr"></div>
 <script>
-async function act(action,id,btn){
-  btn.disabled=true; btn.textContent='...';
-  await fetch('/api/action',{method:'POST',body:JSON.stringify({action,serverId:id}),headers:{'Content-Type':'application/json'}});
-  setTimeout(()=>location.reload(),2000);
-}
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  let busy = null; // serverId currently mid-action (don't clobber its buttons on refresh)
+  function card(s){
+    const online = s.status==='online';
+    const icon = s.icon || s.fallback || '🎮';
+    const ver = s.mcVersion ? ' v'+esc(s.mcVersion) : '';
+    const type = s.terrariaType==='tmodloader' ? ' tModLoader' : (s.mcType && s.mcType!=='vanilla' ? ' '+esc(s.mcType) : '');
+    const pl = s.players|0;
+    const c = s.color ? 'style="--c:'+esc(s.color)+'"' : '';
+    const b = busy===s.id;
+    const btns = b ? '<button class="b" disabled>…</button>'
+      : (online
+          ? '<button class="b bstop" onclick="act(\\'stop\\',\\''+s.id+'\\')">⏹ Stop</button><button class="b brestart" onclick="act(\\'restart\\',\\''+s.id+'\\')">🔄 Restart</button>'
+          : '<button class="b bstart" onclick="act(\\'start\\',\\''+s.id+'\\')">▶ Start</button>');
+    return '<div class="card" '+c+'><div class="row">'
+      + '<div class="ico">'+icon+'</div>'
+      + '<div class="info"><div class="sname"><span class="dot '+s.status+'"></span>'+esc(s.name)+'</div>'
+      + '<div class="smeta">'+esc(s.game)+ver+type+' · Port '+esc(s.port)+' · '+pl+' player'+(pl===1?'':'s')+'</div></div>'
+      + '<div class="stat '+s.status+'">'+(online?'ONLINE':(s.status==='crashed'?'CRASHED':'OFFLINE'))+'</div>'
+      + '</div><div class="btns">'+btns+'</div></div>';
+  }
+  async function refresh(){
+    try{
+      const r = await fetch('/api/servers',{cache:'no-store'}); const d = await r.json();
+      const list = d.servers||[];
+      if(d.accent){ document.documentElement.style.setProperty('--accent', d.accent); }
+      document.getElementById('list').innerHTML = list.length
+        ? list.map(card).join('') : '<div class="empty">No servers yet.</div>';
+      document.getElementById('ftr').textContent = 'Omnex v'+(d.version||'')+' · '+list.length+' server'+(list.length===1?'':'s');
+    }catch(e){ document.getElementById('list').innerHTML = '<div class="empty">Can\\'t reach Omnex. Is it still running?</div>'; }
+  }
+  async function act(action,id){
+    busy=id; refresh();
+    try{ await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,serverId:id})}); }catch(e){}
+    setTimeout(()=>{ busy=null; refresh(); }, 2500);
+  }
+  refresh(); setInterval(()=>{ if(!busy) refresh(); }, 4000);
 </script>
 </body>
 </html>`;
