@@ -954,7 +954,17 @@
         </div>
         <div id="remoteAccessInfo" style="display:none">
           <div class="remote-access-url" id="remoteAccessUrl">Starting...</div>
-          <div style="font-size:10px; color:var(--text-dim); margin-top:4px">Open this URL on any device on your network</div>
+          <div style="font-size:10px; color:var(--text-dim); margin-top:4px">Open this URL on any device on your network. Sign in with your admin password.</div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <div class="settings-row-label">Encrypt with HTTPS</div>
+            <div class="settings-row-desc">Self-signed TLS — recommended before exposing the panel beyond your LAN. Browsers show a one-time "not private" warning you can accept.</div>
+          </div>
+          <button class="cfg-bool-btn" id="setRemoteHttps" onclick="toggleRemoteHttps(this)">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span>
+            <span class="cfg-bool-val">OFF</span>
+          </button>
         </div>
       </div>
 

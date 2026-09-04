@@ -3430,6 +3430,7 @@ function loadSettings() {
     discordCreatePassword: '',  // if set, /create requires this password (gate lives only in Omnex)
     maxConsoleLines:     500,
     defaultBackupKeep:   10,
+    remoteHttps:         false, // serve the Remote Access panel over HTTPS (self-signed)
     autoStartServers:    [],
     theme:               'dark',
     accentColor:         '#00e5ff',  // app highlight color (themable)
@@ -4053,7 +4054,22 @@ let remotePort   = 54321;
 // (discordCreatePassword). A valid login gets a random token cookie good for 7 days.
 const remoteSessions = new Map(); // token -> expiry ms
 const REMOTE_TTL = 7 * 24 * 3600 * 1000;
+// Brute-force protection: lock an IP out after too many wrong passwords.
+const remoteLoginFails = new Map(); // ip -> { fails, lockUntil }
+const REMOTE_MAX_FAILS = 6;
+const REMOTE_LOCK_MS = 5 * 60 * 1000;
+function remoteClientIp(req) { return (req.socket && req.socket.remoteAddress) || 'unknown'; }
 function remoteMakeToken() { return require('crypto').randomBytes(24).toString('hex'); }
+// Generate (once) and cache a self-signed cert for optional HTTPS.
+function ensureRemoteCert() {
+  const p = path.join(USER_DATA, 'remote-tls.json');
+  try { const c = JSON.parse(fs.readFileSync(p, 'utf8')); if (c && c.key && c.cert) return c; } catch (e) {}
+  const selfsigned = require('selfsigned');
+  const pems = selfsigned.generate([{ name: 'commonName', value: 'omnex-remote' }], { keySize: 2048, days: 3650, algorithm: 'sha256' });
+  const out = { key: pems.private, cert: pems.cert };
+  try { fs.writeFileSync(p, JSON.stringify(out)); } catch (e) {}
+  return out;
+}
 function remoteParseCookies(req) {
   const out = {}; const h = req.headers.cookie; if (!h) return out;
   h.split(';').forEach(p => { const i = p.indexOf('='); if (i > 0) out[p.slice(0, i).trim()] = p.slice(i + 1).trim(); });
@@ -4079,10 +4095,12 @@ ipcMain.handle('start-remote-access', async (e, port) => {
   try {
     const http = require('http');
     const os   = require('os');
+    const useHttps = !!appSettings.remoteHttps;
 
-    remoteServer = http.createServer((req, res) => {
+    const handler = (req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       const url = (req.url || '').split('?')[0];
+      const secure = !!(req.socket && req.socket.encrypted);
 
       // Public: the logo (needed on the login screen before auth).
       if (url === '/icon.png') {
@@ -4093,25 +4111,40 @@ ipcMain.handle('start-remote-access', async (e, port) => {
         return;
       }
 
-      // Login: check the password against the Omnex admin password.
+      // Login: check the password against the Omnex admin password (rate-limited).
       if (url === '/api/login' && req.method === 'POST') {
         let body = ''; req.on('data', d => body += d);
         req.on('end', () => {
           res.setHeader('Content-Type', 'application/json');
+          const ip = remoteClientIp(req);
+          const rec = remoteLoginFails.get(ip);
+          if (rec && rec.lockUntil > Date.now()) {
+            res.statusCode = 429;
+            return res.end(JSON.stringify({ ok: false, error: `Too many attempts. Try again in ${Math.ceil((rec.lockUntil - Date.now()) / 60000)} min.` }));
+          }
           let pw = ''; try { pw = String(JSON.parse(body).password || ''); } catch (e) {}
           const gate = String(appSettings.discordCreatePassword || '');
           if (!gate) { res.statusCode = 403; return res.end(JSON.stringify({ ok: false, error: 'Remote access is locked. Set an admin password in Omnex → Settings → Discord → Bot control first.' })); }
-          if (pw !== gate) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, error: 'Incorrect password.' })); }
+          if (pw !== gate) {
+            const r = remoteLoginFails.get(ip) || { fails: 0, lockUntil: 0 };
+            r.fails++;
+            let msg = 'Incorrect password.';
+            if (r.fails >= REMOTE_MAX_FAILS) { r.lockUntil = Date.now() + REMOTE_LOCK_MS; r.fails = 0; msg = 'Too many attempts — locked for 5 minutes.'; }
+            remoteLoginFails.set(ip, r);
+            res.statusCode = 401;
+            return res.end(JSON.stringify({ ok: false, error: msg }));
+          }
+          remoteLoginFails.delete(ip); // success clears the counter
           const token = remoteMakeToken();
           remoteSessions.set(token, Date.now() + REMOTE_TTL);
-          res.setHeader('Set-Cookie', `omnex_remote=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(REMOTE_TTL / 1000)}`);
+          res.setHeader('Set-Cookie', `omnex_remote=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(REMOTE_TTL / 1000)}${secure ? '; Secure' : ''}`);
           res.end(JSON.stringify({ ok: true }));
         });
         return;
       }
       if (url === '/api/logout' && req.method === 'POST') {
         const tok = remoteParseCookies(req).omnex_remote; if (tok) remoteSessions.delete(tok);
-        res.setHeader('Set-Cookie', 'omnex_remote=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+        res.setHeader('Set-Cookie', `omnex_remote=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`);
         res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true }));
         return;
       }
@@ -4159,7 +4192,15 @@ ipcMain.handle('start-remote-access', async (e, port) => {
       // Any page: the dashboard when authed, otherwise the login screen.
       res.setHeader('Content-Type', 'text/html');
       res.end(authed ? generateRemoteDashboard() : generateRemoteLogin(!String(appSettings.discordCreatePassword || '')));
-    });
+    };
+
+    if (useHttps) {
+      const https = require('https');
+      const { key, cert } = ensureRemoteCert();
+      remoteServer = https.createServer({ key, cert }, handler);
+    } else {
+      remoteServer = http.createServer(handler);
+    }
 
     remoteServer.listen(remotePort);
 
@@ -4173,7 +4214,8 @@ ipcMain.handle('start-remote-access', async (e, port) => {
       if (localIp !== 'localhost') break;
     }
 
-    return { ok: true, port: remotePort, ip: localIp, url: `http://${localIp}:${remotePort}` };
+    const scheme = useHttps ? 'https' : 'http';
+    return { ok: true, port: remotePort, ip: localIp, https: useHttps, url: `${scheme}://${localIp}:${remotePort}` };
   } catch(err) {
     remoteServer = null;
     return { ok: false, error: err.message };
@@ -4182,7 +4224,8 @@ ipcMain.handle('start-remote-access', async (e, port) => {
 
 ipcMain.handle('stop-remote-access', () => {
   if (remoteServer) { remoteServer.close(); remoteServer = null; }
-  remoteSessions.clear(); // invalidate all logins when the panel is turned off
+  remoteSessions.clear();   // invalidate all logins when the panel is turned off
+  remoteLoginFails.clear(); // reset brute-force lockouts
   return { ok: true };
 });
 

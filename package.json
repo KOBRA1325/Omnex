@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
+    "selfsigned": "^5.5.0",
     "steam-session": "^1.9.2",
     "steam-totp": "^2.1.2",
     "systeminformation": "^5.22.0",

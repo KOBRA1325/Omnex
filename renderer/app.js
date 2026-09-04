@@ -3045,7 +3045,7 @@ function closeSettingsModal() {
 }
 function applySettingsToUI() {
   if (!appSettings) return;
-  ['notifications','notifyOnCrash','notifyOnStart','notifyOnStop','notifyOnBackup','notifyOnPlayerJoin','discordEnabled','discordChat','discordDeaths','discordBotEnabled','startMinimized','minimizeToTray'].forEach(key => {
+  ['notifications','notifyOnCrash','notifyOnStart','notifyOnStop','notifyOnBackup','notifyOnPlayerJoin','discordEnabled','discordChat','discordDeaths','discordBotEnabled','startMinimized','minimizeToTray','remoteHttps'].forEach(key => {
     const el=document.getElementById(`set${key[0].toUpperCase()+key.slice(1)}`); if(!el) return;
     const val=appSettings[key]||false; el.classList.toggle('on',val);
     const v=el.querySelector('.cfg-bool-val'); if(v) v.textContent=val?'ON':'OFF';
@@ -3189,6 +3189,23 @@ async function toggleRemoteAccess(btn) {
       } else showToast('❌',r.error);
     } catch(e){showToast('❌',e.message);}
   }
+}
+
+async function toggleRemoteHttps(btn) {
+  const next = !appSettings.remoteHttps;
+  appSettings.remoteHttps = next;
+  try { await window.nexus.saveSettings(appSettings); } catch(e) {}
+  btn.classList.toggle('on', next);
+  const v = btn.querySelector('.cfg-bool-val'); if (v) v.textContent = next ? 'ON' : 'OFF';
+  // Apply immediately if the panel is already running (scheme changes).
+  if (remoteAccessActive) {
+    try {
+      await window.nexus.stopRemoteAccess();
+      const r = await window.nexus.startRemoteAccess(54321);
+      if (r && r.ok) { const url=document.getElementById('remoteAccessUrl'); if(url) url.textContent=r.url; }
+    } catch(e) {}
+  }
+  showToast(next ? '🔒' : '🌐', next ? 'HTTPS enabled — restart devices may need to re-accept the cert' : 'HTTPS disabled');
 }
 
 
