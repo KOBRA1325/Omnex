@@ -267,10 +267,12 @@ function switchServerTab(tab) {
   if (tab === 'map') {
     const s = getActive();
     const isTerraria = !!(s && s.game === 'Terraria');
-    const mc = document.getElementById('mapMc'), tr = document.getElementById('mapTerraria');
-    if (mc) mc.style.display = isTerraria ? 'none' : 'flex';
+    const isPal = !!(s && s.game === 'Palworld');
+    const mc = document.getElementById('mapMc'), tr = document.getElementById('mapTerraria'), pal = document.getElementById('mapPalworld');
+    if (mc) mc.style.display = (isTerraria || isPal) ? 'none' : 'flex';
     if (tr) tr.style.display = isTerraria ? 'flex' : 'none';
-    if (isTerraria) updateTerrariaMap(); else updateMapView();
+    if (pal) pal.style.display = isPal ? 'flex' : 'none';
+    if (isTerraria) updateTerrariaMap(); else if (isPal) updatePalMap(); else updateMapView();
   }
   if (tab === 'panel')    { updatePanelView(); }
   if (tab === 'chat')     { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
@@ -434,6 +436,10 @@ function openMapExternal() {
   const url = ((input && input.value) || '').trim() || mapUrlFor(s, (s.mapMode === 'dynmap') ? 'dynmap' : 'bluemap');
   try { window.nexus.openExternal(url); } catch(e) {}
 }
+
+// ── Palworld map (embedded palworld.gg — general reference map) ─────────────────
+function updatePalMap() { const f = document.getElementById('mapPalFrame'); if (f && !f.getAttribute('src')) f.setAttribute('src', 'https://palworld.gg/map'); }
+function reloadPalMap() { const f = document.getElementById('mapPalFrame'); if (f) f.setAttribute('src', 'https://palworld.gg/map?t=' + Date.now()); }
 
 // ── Terraria world map (rendered from the .wld, pan/zoom image) ─────────────────
 let tmap = { scale: 1, tx: 0, ty: 0, natW: 0, natH: 0 };
@@ -1123,7 +1129,7 @@ async function selectServer(id) {
   if (tabs) tabs.style.display = (isMc || isFs || isTerraria || isPal) ? 'flex' : 'none';
   const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria || isPal) ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  { bChat.style.display = (isMc || isTerraria || isPal) ? '' : 'none'; bChat.textContent = isPal ? 'Broadcast' : 'Chat'; }
-  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria) ? '' : 'none';
+  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria || isPal) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
   if (isMc || isTerraria || isPal) loadActivity(id);

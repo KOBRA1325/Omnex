@@ -259,6 +259,17 @@
               <div class="map-empty" id="tMapEmpty">Click <b>Render map</b> to generate a map of your world.</div>
             </div>
           </div>
+          <!-- Palworld map (embedded palworld.gg — a general reference map, not live players) -->
+          <div id="mapPalworld" style="display:none; flex-direction:column; flex:1; min-height:0">
+            <div class="map-modebar">
+              <span style="font-size:12px; color:var(--text-dim); display:flex; align-items:center; padding:0 6px">🗺 Palworld map · palworld.gg</span>
+              <button class="server-tab" onclick="reloadPalMap()">Reload</button>
+              <button class="server-tab" style="margin-left:auto" onclick="window.nexus.openExternal('https://palworld.gg/map')" title="Open in browser">↗</button>
+            </div>
+            <div style="position:relative; flex:1; min-height:0; background:#0a0c10">
+              <iframe id="mapPalFrame" title="Palworld Map" style="width:100%; height:100%; border:0; background:#0a0c10"></iframe>
+            </div>
+          </div>
         </div>
 
         <!-- Web Admin tab (Farming Simulator 25): embed the dedicated-server panel -->
