@@ -4061,13 +4061,18 @@ ipcMain.handle('start-remote-access', async (e, port) => {
       res.setHeader('Content-Type', 'application/json');
 
       if (req.url === '/api/servers') {
-        const data = appData.servers.map(s => ({
-          id: s.id, name: s.name, game: s.game,
-          status: serverProcesses[s.id] ? 'online' : 'offline',
-          port: s.port, players: (s.players || []).length,
-          mcVersion: s.mcVersion, mcType: s.mcType, terrariaType: s.terrariaType,
-          icon: s.customIcon || '', fallback: s.fallback || '', color: s.color || '',
-        }));
+        const data = appData.servers.map(s => {
+          const online = !!serverProcesses[s.id];
+          return {
+            id: s.id, name: s.name, game: s.game,
+            status: online ? 'online' : 'offline',
+            port: s.port,
+            players: online ? (s.players || []).map(mcPlayerName).filter(Boolean) : [],
+            startedAt: online ? (s.startedAt || null) : null,
+            mcVersion: s.mcVersion, mcType: s.mcType, terrariaType: s.terrariaType,
+            icon: s.customIcon || '', fallback: s.fallback || '', color: s.color || '',
+          };
+        });
         res.end(JSON.stringify({ servers: data, accent: appSettings.accentColor || '#00e5ff', version: app.getVersion() }));
       } else if (req.url === '/icon.png') {
         try {
@@ -4149,62 +4154,111 @@ function generateRemoteDashboard() {
     --text:#c8d4e8;--text-dim:#5a6a80;--text-bright:#e8f0ff;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
   body{background:var(--bg);color:var(--text);font-family:'Exo 2',system-ui,sans-serif;
-    padding:18px 16px 40px;max-width:760px;margin:0 auto;-webkit-font-smoothing:antialiased;min-height:100vh}
-  .hdr{display:flex;align-items:center;gap:12px;margin-bottom:22px}
-  .logo{width:38px;height:38px;border-radius:9px;box-shadow:0 0 14px rgba(var(--accent-rgb),.35)}
-  h1{color:var(--accent);font-size:22px;font-weight:800;letter-spacing:3px;line-height:1;text-shadow:0 0 14px rgba(var(--accent-rgb),.4)}
-  .sub{color:var(--text-dim);font-size:11px;font-family:'Share Tech Mono',monospace;letter-spacing:1px;margin-top:3px}
-  .live{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--green);letter-spacing:1px;opacity:.9}
-  .live .d{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px;box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
-  @keyframes pulse{50%{opacity:.35}}
+    -webkit-font-smoothing:antialiased;min-height:100vh;
+    background-image:radial-gradient(900px 500px at 80% -10%, rgba(var(--accent-rgb),.06), transparent 60%);}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 18px 48px}
+  /* Sticky header */
+  .hdr{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:13px;
+    padding:16px 0 14px;margin-bottom:16px;
+    background:linear-gradient(var(--bg) 78%, transparent);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--border)}
+  .logo{width:40px;height:40px;border-radius:10px;box-shadow:0 0 16px rgba(var(--accent-rgb),.35);flex-shrink:0}
+  h1{color:var(--accent);font-size:23px;font-weight:800;letter-spacing:3px;line-height:1;text-shadow:0 0 16px rgba(var(--accent-rgb),.4)}
+  .sub{color:var(--text-dim);font-size:10.5px;font-family:'Share Tech Mono',monospace;letter-spacing:1.5px;margin-top:4px}
+  .live{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .livebadge{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--green);letter-spacing:1px;
+    display:flex;align-items:center;padding:5px 9px;border:1px solid rgba(57,255,110,.25);border-radius:6px;background:rgba(57,255,110,.06)}
+  .livebadge .d{width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:6px;box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.3}}
+  .rbtn{background:var(--surface);border:1px solid var(--border);color:var(--text-dim);border-radius:6px;
+    width:32px;height:32px;font-size:15px;cursor:pointer;transition:all .15s;flex-shrink:0}
+  .rbtn:hover{color:var(--accent);border-color:rgba(var(--accent-rgb),.5)}
+  .rbtn.spin{animation:spin .6s linear}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* Summary stat bar */
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  .chip{flex:1;min-width:110px;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 14px}
+  .chip .n{font-size:22px;font-weight:800;color:var(--text-bright);line-height:1}
+  .chip .l{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--text-dim);margin-top:5px;text-transform:uppercase}
+  .chip.on .n{color:var(--green)} .chip.pl .n{color:var(--accent)}
+  /* Responsive server grid */
+  .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:13px}
   .card{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--c,var(--accent));
-    border-radius:12px;padding:14px 16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+    border-radius:12px;padding:15px 16px;box-shadow:0 2px 10px rgba(0,0,0,.35);display:flex;flex-direction:column}
   .row{display:flex;align-items:center;gap:12px}
-  .ico{width:40px;height:40px;border-radius:9px;background:var(--surface);border:1px solid var(--border);
-    display:flex;align-items:center;justify-content:center;font-size:21px;flex-shrink:0}
+  .ico{width:42px;height:42px;border-radius:10px;background:var(--surface);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
   .info{flex:1;min-width:0}
-  .sname{font-weight:700;font-size:15px;color:var(--text-bright);display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sname{font-weight:700;font-size:15.5px;color:var(--text-bright);display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dot{width:8px;height:8px;border-radius:50%;margin-right:8px;flex-shrink:0}
   .dot.online{background:var(--green);box-shadow:0 0 8px rgba(57,255,110,.6)}
   .dot.offline{background:var(--text-dim)}.dot.crashed{background:var(--red)}
   .smeta{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-dim);margin-top:3px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .stat{font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;padding:4px 9px;border-radius:5px;flex-shrink:0}
+  .stat{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;padding:4px 9px;border-radius:5px;flex-shrink:0}
   .stat.online{color:var(--green);background:rgba(57,255,110,.12)}
   .stat.offline{color:var(--text-dim);background:rgba(90,106,128,.12)}
   .stat.crashed{color:var(--red);background:rgba(255,59,92,.12)}
-  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px}
-  button.b{padding:9px 18px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px;
-    font-family:'Exo 2',sans-serif;transition:filter .15s;background:transparent}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .badge{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text);background:var(--surface);
+    border:1px solid var(--border);border-radius:5px;padding:3px 8px}
+  .badge.up{color:var(--green);border-color:rgba(57,255,110,.3)}
+  .players{margin-top:11px;font-size:12px;color:var(--text)}
+  .players .plabel{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;margin-bottom:5px}
+  .ptag{display:inline-block;background:rgba(var(--accent-rgb),.1);border:1px solid rgba(var(--accent-rgb),.25);
+    color:var(--text-bright);border-radius:12px;padding:2px 9px;font-size:11px;margin:0 5px 5px 0}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:14px}
+  button.b{padding:9px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px;
+    font-family:'Exo 2',sans-serif;transition:filter .15s;background:transparent;flex:1;min-width:88px}
   button.b:active{filter:brightness(1.3)}
   button.b:disabled{opacity:.5;cursor:default}
   .bstart{color:var(--green);border:1px solid var(--green);background:rgba(57,255,110,.12)}
   .bstop{color:var(--red);border:1px solid var(--red);background:rgba(255,59,92,.12)}
   .brestart{color:var(--yellow);border:1px solid var(--yellow);background:rgba(255,215,0,.12)}
-  .empty{color:var(--text-dim);font-size:13px;text-align:center;padding:40px 0}
-  .ftr{color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10px;text-align:center;margin-top:22px;opacity:.6}
+  .empty{color:var(--text-dim);font-size:13px;text-align:center;padding:50px 0;grid-column:1/-1}
+  .ftr{color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10px;text-align:center;margin-top:26px;opacity:.55}
+  @media(max-width:520px){ .wrap{padding:0 12px 40px} h1{font-size:20px} .chip .n{font-size:19px} }
 </style>
 </head>
 <body>
-<div class="hdr">
-  <img class="logo" src="/icon.png" alt="" onerror="this.style.display='none'">
-  <div><h1>OMNEX</h1><div class="sub">REMOTE ACCESS · LOCAL NETWORK</div></div>
-  <div class="live"><span class="d"></span>LIVE</div>
+<div class="wrap">
+  <div class="hdr">
+    <img class="logo" src="/icon.png" alt="" onerror="this.style.display='none'">
+    <div><h1>OMNEX</h1><div class="sub">REMOTE ACCESS · LOCAL NETWORK</div></div>
+    <div class="live">
+      <span class="livebadge"><span class="d"></span>LIVE</span>
+      <button class="rbtn" id="rbtn" onclick="refresh(true)" title="Refresh">↻</button>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div class="list" id="list"><div class="empty">Loading…</div></div>
+  <div class="ftr" id="ftr"></div>
 </div>
-<div id="list"><div class="empty">Loading…</div></div>
-<div class="ftr" id="ftr"></div>
 <script>
   const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  let busy = null; // serverId currently mid-action (don't clobber its buttons on refresh)
+  let busy = null; // serverId mid-action (don't clobber its buttons on refresh)
+  function fmtUptime(ms){
+    if(!ms||ms<0) return '';
+    const s=Math.floor(ms/1000), d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
+    if(d) return d+'d '+h+'h'; if(h) return h+'h '+m+'m'; if(m) return m+'m'; return s+'s';
+  }
   function card(s){
     const online = s.status==='online';
     const icon = s.icon || s.fallback || '🎮';
-    const ver = s.mcVersion ? ' v'+esc(s.mcVersion) : '';
-    const type = s.terrariaType==='tmodloader' ? ' tModLoader' : (s.mcType && s.mcType!=='vanilla' ? ' '+esc(s.mcType) : '');
-    const pl = s.players|0;
+    const names = Array.isArray(s.players) ? s.players : [];
+    const pl = names.length;
     const c = s.color ? 'style="--c:'+esc(s.color)+'"' : '';
     const b = busy===s.id;
+    // badges: game, version/type, uptime
+    const badges = ['<span class="badge">'+esc(s.game)+'</span>'];
+    if(s.terrariaType==='tmodloader') badges.push('<span class="badge">tModLoader</span>');
+    else if(s.mcType && s.mcType!=='vanilla') badges.push('<span class="badge">'+esc(s.mcType)+'</span>');
+    if(s.mcVersion) badges.push('<span class="badge">v'+esc(s.mcVersion)+'</span>');
+    if(online && s.startedAt){ const u=fmtUptime(Date.now()-s.startedAt); if(u) badges.push('<span class="badge up">▲ '+u+'</span>'); }
+    const playersHtml = (online && pl)
+      ? '<div class="players"><div class="plabel">'+pl+' online</div>'+names.map(n=>'<span class="ptag">'+esc(n)+'</span>').join('')+'</div>' : '';
     const btns = b ? '<button class="b" disabled>…</button>'
       : (online
           ? '<button class="b bstop" onclick="act(\\'stop\\',\\''+s.id+'\\')">⏹ Stop</button><button class="b brestart" onclick="act(\\'restart\\',\\''+s.id+'\\')">🔄 Restart</button>'
@@ -4212,18 +4266,29 @@ function generateRemoteDashboard() {
     return '<div class="card" '+c+'><div class="row">'
       + '<div class="ico">'+icon+'</div>'
       + '<div class="info"><div class="sname"><span class="dot '+s.status+'"></span>'+esc(s.name)+'</div>'
-      + '<div class="smeta">'+esc(s.game)+ver+type+' · Port '+esc(s.port)+' · '+pl+' player'+(pl===1?'':'s')+'</div></div>'
+      + '<div class="smeta">Port '+esc(s.port)+' · '+pl+' player'+(pl===1?'':'s')+'</div></div>'
       + '<div class="stat '+s.status+'">'+(online?'ONLINE':(s.status==='crashed'?'CRASHED':'OFFLINE'))+'</div>'
-      + '</div><div class="btns">'+btns+'</div></div>';
+      + '</div><div class="badges">'+badges.join('')+'</div>'+playersHtml
+      + '<div class="btns">'+btns+'</div></div>';
   }
-  async function refresh(){
+  function renderStats(list){
+    const total=list.length, on=list.filter(s=>s.status==='online').length;
+    const players=list.reduce((a,s)=>a+((s.players&&s.players.length)||0),0);
+    document.getElementById('stats').innerHTML =
+      '<div class="chip"><div class="n">'+total+'</div><div class="l">Servers</div></div>'
+     +'<div class="chip on"><div class="n">'+on+'</div><div class="l">Online</div></div>'
+     +'<div class="chip pl"><div class="n">'+players+'</div><div class="l">Players</div></div>';
+  }
+  async function refresh(manual){
+    if(manual){ const b=document.getElementById('rbtn'); b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin'); }
     try{
       const r = await fetch('/api/servers',{cache:'no-store'}); const d = await r.json();
       const list = d.servers||[];
       if(d.accent){ document.documentElement.style.setProperty('--accent', d.accent); }
+      renderStats(list);
       document.getElementById('list').innerHTML = list.length
         ? list.map(card).join('') : '<div class="empty">No servers yet.</div>';
-      document.getElementById('ftr').textContent = 'Omnex v'+(d.version||'')+' · '+list.length+' server'+(list.length===1?'':'s');
+      document.getElementById('ftr').textContent = 'Omnex v'+(d.version||'')+' · updated '+new Date().toLocaleTimeString();
     }catch(e){ document.getElementById('list').innerHTML = '<div class="empty">Can\\'t reach Omnex. Is it still running?</div>'; }
   }
   async function act(action,id){
