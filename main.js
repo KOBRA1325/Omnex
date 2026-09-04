@@ -4183,41 +4183,50 @@ function generateRemoteDashboard() {
   .chip .n{font-size:22px;font-weight:800;color:var(--text-bright);line-height:1}
   .chip .l{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--text-dim);margin-top:5px;text-transform:uppercase}
   .chip.on .n{color:var(--green)} .chip.pl .n{color:var(--accent)}
+  /* Section grouping (Online / Offline) */
+  .section{display:flex;align-items:center;gap:10px;margin:22px 2px 11px}
+  .section:first-child{margin-top:4px}
+  .section .sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .section .sdot.on{background:var(--green);box-shadow:0 0 8px rgba(57,255,110,.5)}
+  .section .sdot.off{background:var(--text-dim)}
+  .section .lbl{font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:var(--text-dim);text-transform:uppercase}
+  .section .rule{flex:1;height:1px;background:var(--border)}
+  .section .cnt{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-dim)}
   /* Responsive server grid */
-  .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:13px}
+  .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:13px}
+  /* Card = header / body / action-footer zones separated by hairlines */
   .card{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--c,var(--accent));
-    border-radius:12px;padding:15px 16px;box-shadow:0 2px 10px rgba(0,0,0,.35);display:flex;flex-direction:column}
-  .row{display:flex;align-items:center;gap:12px}
+    border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+  .card.off{opacity:.9}
+  .chead{display:flex;align-items:center;gap:12px;padding:14px 15px}
   .ico{width:42px;height:42px;border-radius:10px;background:var(--surface);border:1px solid var(--border);
     display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0}
   .info{flex:1;min-width:0}
-  .sname{font-weight:700;font-size:15.5px;color:var(--text-bright);display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dot{width:8px;height:8px;border-radius:50%;margin-right:8px;flex-shrink:0}
-  .dot.online{background:var(--green);box-shadow:0 0 8px rgba(57,255,110,.6)}
-  .dot.offline{background:var(--text-dim)}.dot.crashed{background:var(--red)}
+  .sname{font-weight:700;font-size:15.5px;color:var(--text-bright);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .smeta{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--text-dim);margin-top:3px;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .stat{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;padding:4px 9px;border-radius:5px;flex-shrink:0}
   .stat.online{color:var(--green);background:rgba(57,255,110,.12)}
   .stat.offline{color:var(--text-dim);background:rgba(90,106,128,.12)}
   .stat.crashed{color:var(--red);background:rgba(255,59,92,.12)}
-  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+  .cbody{padding:13px 15px;border-top:1px solid var(--border)}
+  .badges{display:flex;gap:6px;flex-wrap:wrap}
   .badge{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text);background:var(--surface);
     border:1px solid var(--border);border-radius:5px;padding:3px 8px}
   .badge.up{color:var(--green);border-color:rgba(57,255,110,.3)}
-  .players{margin-top:11px;font-size:12px;color:var(--text)}
-  .players .plabel{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;margin-bottom:5px}
+  .players{margin-top:12px}
+  .plabel{font-family:'Share Tech Mono',monospace;font-size:9.5px;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;margin-bottom:6px}
   .ptag{display:inline-block;background:rgba(var(--accent-rgb),.1);border:1px solid rgba(var(--accent-rgb),.25);
     color:var(--text-bright);border-radius:12px;padding:2px 9px;font-size:11px;margin:0 5px 5px 0}
-  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto;padding-top:14px}
+  .cfoot{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border);background:rgba(0,0,0,.18);margin-top:auto}
   button.b{padding:9px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:1px;
-    font-family:'Exo 2',sans-serif;transition:filter .15s;background:transparent;flex:1;min-width:88px}
+    font-family:'Exo 2',sans-serif;transition:filter .15s;background:transparent;flex:1;min-width:80px}
   button.b:active{filter:brightness(1.3)}
   button.b:disabled{opacity:.5;cursor:default}
   .bstart{color:var(--green);border:1px solid var(--green);background:rgba(57,255,110,.12)}
   .bstop{color:var(--red);border:1px solid var(--red);background:rgba(255,59,92,.12)}
   .brestart{color:var(--yellow);border:1px solid var(--yellow);background:rgba(255,215,0,.12)}
-  .empty{color:var(--text-dim);font-size:13px;text-align:center;padding:50px 0;grid-column:1/-1}
+  .empty{color:var(--text-dim);font-size:13px;text-align:center;padding:50px 0}
   .ftr{color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:10px;text-align:center;margin-top:26px;opacity:.55}
   @media(max-width:520px){ .wrap{padding:0 12px 40px} h1{font-size:20px} .chip .n{font-size:19px} }
 </style>
@@ -4233,7 +4242,7 @@ function generateRemoteDashboard() {
     </div>
   </div>
   <div class="stats" id="stats"></div>
-  <div class="list" id="list"><div class="empty">Loading…</div></div>
+  <div id="content"><div class="empty">Loading…</div></div>
   <div class="ftr" id="ftr"></div>
 </div>
 <script>
@@ -4263,13 +4272,19 @@ function generateRemoteDashboard() {
       : (online
           ? '<button class="b bstop" onclick="act(\\'stop\\',\\''+s.id+'\\')">⏹ Stop</button><button class="b brestart" onclick="act(\\'restart\\',\\''+s.id+'\\')">🔄 Restart</button>'
           : '<button class="b bstart" onclick="act(\\'start\\',\\''+s.id+'\\')">▶ Start</button>');
-    return '<div class="card" '+c+'><div class="row">'
-      + '<div class="ico">'+icon+'</div>'
-      + '<div class="info"><div class="sname"><span class="dot '+s.status+'"></span>'+esc(s.name)+'</div>'
+    return '<div class="card '+(online?'':'off')+'" '+c+'>'
+      + '<div class="chead"><div class="ico">'+icon+'</div>'
+      + '<div class="info"><div class="sname">'+esc(s.name)+'</div>'
       + '<div class="smeta">Port '+esc(s.port)+' · '+pl+' player'+(pl===1?'':'s')+'</div></div>'
-      + '<div class="stat '+s.status+'">'+(online?'ONLINE':(s.status==='crashed'?'CRASHED':'OFFLINE'))+'</div>'
-      + '</div><div class="badges">'+badges.join('')+'</div>'+playersHtml
-      + '<div class="btns">'+btns+'</div></div>';
+      + '<div class="stat '+s.status+'">'+(online?'ONLINE':(s.status==='crashed'?'CRASHED':'OFFLINE'))+'</div></div>'
+      + '<div class="cbody"><div class="badges">'+badges.join('')+'</div>'+playersHtml+'</div>'
+      + '<div class="cfoot">'+btns+'</div></div>';
+  }
+  function section(lbl, cls, arr){
+    if(!arr.length) return '';
+    return '<div class="section"><span class="sdot '+cls+'"></span><span class="lbl">'+lbl+'</span>'
+      + '<span class="rule"></span><span class="cnt">'+arr.length+'</span></div>'
+      + '<div class="list">'+arr.map(card).join('')+'</div>';
   }
   function renderStats(list){
     const total=list.length, on=list.filter(s=>s.status==='online').length;
@@ -4286,10 +4301,13 @@ function generateRemoteDashboard() {
       const list = d.servers||[];
       if(d.accent){ document.documentElement.style.setProperty('--accent', d.accent); }
       renderStats(list);
-      document.getElementById('list').innerHTML = list.length
-        ? list.map(card).join('') : '<div class="empty">No servers yet.</div>';
+      const on = list.filter(s=>s.status==='online').sort((a,b)=>a.name.localeCompare(b.name));
+      const off = list.filter(s=>s.status!=='online').sort((a,b)=>a.name.localeCompare(b.name));
+      document.getElementById('content').innerHTML = list.length
+        ? (section('Online','on',on) + section('Offline','off',off))
+        : '<div class="empty">No servers yet.</div>';
       document.getElementById('ftr').textContent = 'Omnex v'+(d.version||'')+' · updated '+new Date().toLocaleTimeString();
-    }catch(e){ document.getElementById('list').innerHTML = '<div class="empty">Can\\'t reach Omnex. Is it still running?</div>'; }
+    }catch(e){ document.getElementById('content').innerHTML = '<div class="empty">Can\\'t reach Omnex. Is it still running?</div>'; }
   }
   async function act(action,id){
     busy=id; refresh();
