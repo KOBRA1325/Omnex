@@ -293,10 +293,12 @@ const GAME_DEFS = {
   'Ark: Survival Ascended': { type:'steam', serverAppId:'2430930', startExe:'ArkAscendedServer.exe', startArgs:(d,s)=>{
     const pw = s.rconPassword || 'omnex';
     const map = s.arkMap || 'TheIsland_WP';
-    return [
+    const args = [
       `${map}?listen?Port=${s.port||7777}?RCONEnabled=True?RCONPort=${s.rconPort||27020}?ServerAdminPassword=${pw}`,
       '-server', '-log', `-WinLiveMaxPlayers=${s.maxPlayers||70}`,
     ];
+    if (s.noBattlEye) args.push('-NoBattlEye');
+    return args;
   } },
   'V Rising':        { type:'steam', serverAppId:'1829350',startExe:'VRisingServer.exe',        startArgs:(d,s)=>['-persistentDataPath','./save-data','-serverName',s.name||'My V Rising Server','-port',String(s.port||9876)] },
   'Terraria':        { type:'steam', serverAppId:'105600', startExe:'TerrariaServer.exe',       startArgs:(d,s)=> s.terrariaType==='tmodloader'
@@ -2358,8 +2360,18 @@ const GAME_CONFIG_DEFS = {
     ],
   },
 };
-// Ark: Survival Ascended uses the same GameUserSettings.ini schema as Evolved.
-GAME_CONFIG_DEFS['Ark: Survival Ascended'] = GAME_CONFIG_DEFS['Ark: Survival'];
+// Ark: Survival Ascended uses the same GameUserSettings.ini schema as Evolved,
+// plus a Launch Options group for ASA-only launch flags (server fields, not ini keys).
+GAME_CONFIG_DEFS['Ark: Survival Ascended'] = {
+  file: GAME_CONFIG_DEFS['Ark: Survival'].file,
+  props: [
+    ...GAME_CONFIG_DEFS['Ark: Survival'].props,
+    { group: '🚀 Launch Options', props: [
+      { key: 'noBattlEye', label: 'Disable BattlEye Anti-Cheat', type: 'serverBool',
+        desc: 'Adds -NoBattlEye at launch. Some players need this to connect to unofficial servers. Restart to apply.' },
+    ]},
+  ],
+};
 
 // Enhanced read-config that handles multiple file types
 ipcMain.handle('read-server-config', (e, id) => {
@@ -5696,6 +5708,8 @@ function startLogTailer(serverId, server) {
           for (const line of lines) {
             // Filter out overly noisy Unreal frame-timing lines
             if (/LogRHI:|LogSlate:|LogEditor:|LogInit:.*OS: Windows/.test(line)) continue;
+            // Ark: Survival Ascended floods the log with GameAnalytics SDK telemetry — hide it.
+            if (/GameAnalytics/i.test(line)) continue;
             // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
             if (/executed the command\.?\s*ShowPlayers/i.test(line)) continue;
             // Suppress the /list poll output (still parse it for names)
