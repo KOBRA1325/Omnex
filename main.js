@@ -290,6 +290,14 @@ const GAME_DEFS = {
   'Satisfactory':    { type:'steam', serverAppId:'1690800',startExe:'FactoryServer.exe',        startArgs:(d,s)=>['-Port='+(s.port||15777)] },
   'Project Zomboid': { type:'steam', serverAppId:'380870', startExe:'ProjectZomboidServer.bat', startArgs:(d,s)=>['-port',String(s.port||16261)] },
   'Ark: Survival':   { type:'steam', serverAppId:'376030', startExe:'ShooterGameServer.exe',    startArgs:(d,s)=>[`TheIsland?listen?Port=${s.port||7777}?MaxPlayers=20`,'-server','-log'] },
+  'Ark: Survival Ascended': { type:'steam', serverAppId:'2430930', startExe:'ArkAscendedServer.exe', startArgs:(d,s)=>{
+    const pw = s.rconPassword || 'omnex';
+    const map = s.arkMap || 'TheIsland_WP';
+    return [
+      `${map}?listen?Port=${s.port||7777}?RCONEnabled=True?RCONPort=${s.rconPort||27020}?ServerAdminPassword=${pw}`,
+      '-server', '-log', `-WinLiveMaxPlayers=${s.maxPlayers||70}`,
+    ];
+  } },
   'V Rising':        { type:'steam', serverAppId:'1829350',startExe:'VRisingServer.exe',        startArgs:(d,s)=>['-persistentDataPath','./save-data','-serverName',s.name||'My V Rising Server','-port',String(s.port||9876)] },
   'Terraria':        { type:'steam', serverAppId:'105600', startExe:'TerrariaServer.exe',       startArgs:(d,s)=> s.terrariaType==='tmodloader'
                           ? ['-config', 'serverconfig.txt', '-nosteam']   // relative path = space-safe under shell; -nosteam = standalone (IP) server
@@ -1263,7 +1271,7 @@ function syncServerConfig(serverId, server, isInstall = false) {
       // Server name is set via -servername launch arg (already handled in startArgs)
     }
 
-    else if (server.game === 'Ark: Survival') {
+    else if (server.game === 'Ark: Survival' || server.game === 'Ark: Survival Ascended') {
       const iniPath = path.join(server.installDir, 'ShooterGame', 'Saved', 'Config', 'WindowsServer', 'GameUserSettings.ini');
       if (fs.existsSync(iniPath)) {
         let ini = fs.readFileSync(iniPath, 'utf8');
@@ -2350,6 +2358,8 @@ const GAME_CONFIG_DEFS = {
     ],
   },
 };
+// Ark: Survival Ascended uses the same GameUserSettings.ini schema as Evolved.
+GAME_CONFIG_DEFS['Ark: Survival Ascended'] = GAME_CONFIG_DEFS['Ark: Survival'];
 
 // Enhanced read-config that handles multiple file types
 ipcMain.handle('read-server-config', (e, id) => {
@@ -4768,6 +4778,7 @@ const GAME_DEFAULT_PORTS = {
   'Minecraft':'25565', 'CS2':'27015', 'Valheim':'2456', 'Rust':'28015', 'Satisfactory':'15777',
   'Project Zomboid':'16261', 'Ark: Survival':'7777', 'V Rising':'9876', 'Terraria':'7777',
   '7 Days to Die':'26900', 'Palworld':'8211', 'Enshrouded':'15636', 'Farming Simulator 25':'10823',
+  'Ark: Survival Ascended':'7777',
 };
 
 // Best-effort: read the actual configured port out of a known server config file.
@@ -5625,6 +5636,7 @@ function getGameLogPath(server) {
       // Palworld log location — most recent per-run log
       return findLatestLog(path.join(server.installDir, 'Pal', 'Saved', 'Logs'), '.log');
     case 'Ark: Survival':
+    case 'Ark: Survival Ascended':
       return findLatestLog(path.join(server.installDir, 'ShooterGame', 'Saved', 'Logs'), '.log');
     case 'V Rising':
       return findLatestLog(path.join(server.installDir, 'logs'), '.log');
@@ -5732,6 +5744,7 @@ async function startServerById(id) {
   // Palworld: make sure RCON is enabled with a known admin password so we can
   // gracefully shut it down and read live player counts.
   if (server.game === 'Palworld') configurePalworldRcon(server);
+  if (server.game === 'Ark: Survival Ascended') configureArkRcon(server);
 
   const def = GAME_DEFS[server.game];
   let exe, args;
@@ -6064,6 +6077,32 @@ function rconCommand(host, port, password, command, timeoutMs = 3000) {
 // Ensure a Palworld server has RCON enabled with an admin password Omnex knows,
 // so it can gracefully shut down (deregisters from the community list) and read
 // player counts. Only generates an admin password if the user hasn't set one.
+// Ark: Survival Ascended — ensure RCON is on with a known admin password (used for
+// Activity player polling + graceful SaveWorld). Respects a user-set ServerAdminPassword.
+function configureArkRcon(server) {
+  const iniPath = path.join(server.installDir, 'ShooterGame', 'Saved', 'Config', 'WindowsServer', 'GameUserSettings.ini');
+  let ini = null;
+  try { if (fs.existsSync(iniPath)) ini = fs.readFileSync(iniPath, 'utf8'); } catch (e) {}
+  let admin = server.rconPassword || '';
+  if (ini) { const m = ini.match(/^ServerAdminPassword=(.*)$/m); if (m && m[1].trim()) admin = m[1].trim(); }
+  if (!admin) admin = 'omnex' + Math.random().toString(36).slice(2, 10);
+  server.rconPassword = admin;
+  server.rconPort = server.rconPort || 27020;
+  saveData();
+  // If the ini exists, keep it in sync so the config editor reflects RCON (the map-URL
+  // launch options already enable it either way).
+  if (ini) {
+    const ensure = (key, val) => {
+      const re = new RegExp('^' + key + '=.*$', 'm');
+      if (re.test(ini)) ini = ini.replace(re, `${key}=${val}`);
+      else if (ini.includes('[ServerSettings]')) ini = ini.replace('[ServerSettings]', `[ServerSettings]\n${key}=${val}`);
+      else ini = `[ServerSettings]\n${key}=${val}\n` + ini;
+    };
+    ensure('RCONEnabled', 'True'); ensure('RCONPort', String(server.rconPort)); ensure('ServerAdminPassword', admin);
+    try { fs.writeFileSync(iniPath, ini); } catch (e) {}
+  }
+}
+
 function configurePalworldRcon(server) {
   try {
     const iniPath = path.join(server.installDir, 'Pal', 'Saved', 'Config', 'WindowsServer', 'PalWorldSettings.ini');
@@ -6140,6 +6179,19 @@ async function killServer(id) {
     } catch(e) {}
     if (!serverProcesses[id]) { srv.pid = null; saveData(); return { ok:true }; }
   }
+  // Ark: Survival Ascended — save the world via RCON before exiting, so we never
+  // lose progress since the last autosave. SaveWorld → DoExit, then fall through.
+  if (proc && srv && srv.game === 'Ark: Survival Ascended' && srv.rconPassword) {
+    proc._omnexIntentionalStop = true;
+    try {
+      log(id, 'dim', 'Saving the world via RCON before shutdown (SaveWorld)...');
+      await rconCommand('127.0.0.1', srv.rconPort || 27020, srv.rconPassword, 'SaveWorld');
+      await rconCommand('127.0.0.1', srv.rconPort || 27020, srv.rconPassword, 'DoExit');
+      for (let i = 0; i < 20 && serverProcesses[id]; i++) await new Promise(r => setTimeout(r, 500)); // up to ~10s
+    } catch(e) {}
+    if (!serverProcesses[id]) { srv.pid = null; saveData(); return { ok:true }; }
+  }
+
   // Terraria saves the world only on a clean "exit" command (stdin). Force-killing
   // loses everything since the last autosave, so ask it to shut down gracefully first.
   if (proc && srv && srv.game === 'Terraria') {
@@ -6432,10 +6484,51 @@ async function pollPalworldPlayers(s) {
   }
 }
 
+// Ark: Survival Ascended — poll the online player list via RCON ListPlayers and
+// diff it for join/leave activity (ASA exposes no coordinates, so this is the
+// closest to live tracking it allows).
+async function pollArkPlayers(s) {
+  if (!s || s.game !== 'Ark: Survival Ascended' || !serverProcesses[s.id] || !s.rconPassword) return;
+  if (_playerPollInFlight.has(s.id)) return;
+  if (_playerPollSkip[s.id] > 0) { _playerPollSkip[s.id]--; return; }
+  _playerPollInFlight.add(s.id);
+  try {
+    const res = await rconCommand('127.0.0.1', s.rconPort || 27020, s.rconPassword, 'ListPlayers');
+    if (res === null) { _playerPollSkip[s.id] = 4; return; }
+    // "0. PlayerName, <id>" per line, or "No Players Connected".
+    const players = /no players/i.test(res) ? [] : res.split('\n').map(l => {
+      const m = l.match(/^\s*\d+\.\s*(.+?),\s*(\S+)\s*$/);
+      return m ? { name: m[1].trim(), steamId: m[2].trim() } : null;
+    }).filter(Boolean);
+    const proc = serverProcesses[s.id];
+    const seeded = s._arkPollProc === proc;
+    s._arkPollProc = proc;
+    if (seeded) {
+      const prev = new Set((s.players || []).map(p => p.name));
+      const now  = new Set(players.map(p => p.name));
+      for (const p of players) if (!prev.has(p.name)) {
+        recordActivity(s.id, 'join', `${p.name} joined`, p.name);
+        notify('playerJoin', { serverId: s.id, title: `➕ ${p.name} joined ${s.name}`, body: `${p.name} joined. ${players.length} online.` });
+      }
+      for (const nm of prev) if (!now.has(nm)) {
+        recordActivity(s.id, 'leave', `${nm} left`, nm);
+        noteLeave(s.id);
+        notify('playerLeave', { serverId: s.id, title: `➖ ${nm} left ${s.name}`, body: `${nm} left. ${players.length} online.` });
+      }
+    }
+    s.players = players;
+    checkPlayerDrop(s.id, players.length);
+    trackPlayers(s.id, players.map(p => p.name));
+    emit('players-updated', { serverId: s.id, players });
+  } finally {
+    _playerPollInFlight.delete(s.id);
+  }
+}
+
 // Poll the player list every 45s (was 20s). Palworld's RCON is hitch-prone, so
 // less-frequent polling + the in-flight/backoff guards above keep Omnex from
 // adding to the server's CPU spikes.
-setInterval(() => { for (const s of appData.servers) pollPalworldPlayers(s); }, 45000);
+setInterval(() => { for (const s of appData.servers) { pollPalworldPlayers(s); pollArkPlayers(s); } }, 45000);
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function findExe(dir, name) {

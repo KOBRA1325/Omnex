@@ -174,6 +174,7 @@ const GAMES = [
   { name:'Satisfactory',    port:'15777', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/526870/capsule_sm_120.jpg',  fallback:'🏭' },
   { name:'Project Zomboid', port:'16261', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/108600/capsule_sm_120.jpg',  fallback:'🧟' },
   { name:'Ark: Survival',   port:'7777',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/346110/capsule_sm_120.jpg',  fallback:'🦕' },
+  { name:'Ark: Survival Ascended', port:'7777', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/2399830/capsule_sm_120.jpg', fallback:'🦖' },
   { name:'V Rising',        port:'9876',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1604030/capsule_sm_120.jpg', fallback:'🧛' },
   { name:'Terraria',        port:'7777',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/105600/capsule_sm_120.jpg',  fallback:'🌳' },
   { name:'7 Days to Die',   port:'26900', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/251570/capsule_sm_120.jpg',  fallback:'💀' },
@@ -318,7 +319,7 @@ async function loadActivity(id) {
   if (!items || !items.length) {
     const g = (servers.find(sv => sv.id === id) || {}).game;
     const detail = g === 'Minecraft' ? 'players join, die, earn advancements, and chat'
-      : g === 'Palworld' ? 'players join and leave'
+      : (g === 'Palworld' || g === 'Ark: Survival Ascended') ? 'players join and leave'
       : 'players join, leave, chat, and die';
     feed.innerHTML = `<div class="empty-msg-sm" style="padding:12px">No activity yet — it'll fill up as ${detail}.</div>`;
     return;
@@ -1125,14 +1126,15 @@ async function selectServer(id) {
   const isFs = !!(s && s.game === 'Farming Simulator 25');
   const isTerraria = !!(s && s.game === 'Terraria');
   const isPal = !!(s && s.game === 'Palworld');
+  const isAsa = !!(s && s.game === 'Ark: Survival Ascended');
   const tabs = document.getElementById('serverTabs');
-  if (tabs) tabs.style.display = (isMc || isFs || isTerraria || isPal) ? 'flex' : 'none';
-  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria || isPal) ? '' : 'none';
+  if (tabs) tabs.style.display = (isMc || isFs || isTerraria || isPal || isAsa) ? 'flex' : 'none';
+  const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria || isPal || isAsa) ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  { bChat.style.display = (isMc || isTerraria || isPal) ? '' : 'none'; bChat.textContent = isPal ? 'Broadcast' : 'Chat'; }
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria || isPal) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
-  if (isMc || isTerraria || isPal) loadActivity(id);
+  if (isMc || isTerraria || isPal || isAsa) loadActivity(id);
   const chatOut = document.getElementById('chatOutput');
   if (chatOut) chatOut.innerHTML = `<div class="empty-msg-sm" style="padding:12px">${isPal ? 'Send an announcement to all players. (Palworld can\'t relay players\' chat back.)' : 'No chat yet.'}</div>`;
   const chatIn = document.getElementById('chatInput');
@@ -1482,7 +1484,7 @@ function pickTerrariaType(type) {
 }
 function updateInstallInfo() {
   const g = selectedGame;
-  const steamGames = ['CS2','Valheim','Rust','Satisfactory','Project Zomboid','Ark: Survival','V Rising','Terraria','7 Days to Die','Palworld','Enshrouded'];
+  const steamGames = ['CS2','Valheim','Rust','Satisfactory','Project Zomboid','Ark: Survival','Ark: Survival Ascended','V Rising','Terraria','7 Days to Die','Palworld','Enshrouded'];
   const isSteam = steamGames.includes(g.name);
   const existing = servers.filter(s => s.game === g.name);
   const countNote = existing.length > 0 ? ` You already have ${existing.length} ${g.name} server${existing.length>1?'s':''} — this will create a new one.` : '';  const el = document.getElementById('installInfoText'); if(!el) return;
