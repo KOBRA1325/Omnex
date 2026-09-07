@@ -6007,9 +6007,9 @@ ipcMain.handle('send-command',  async (e,{id,command}) => {
   const server = appData.servers.find(s => s.id === id);
   const proc = serverProcesses[id];
   if (!proc) return { ok:false, error:'Not running' };
-  // Palworld doesn't read stdin — route console commands through RCON and echo
-  // the response (e.g. Info, ShowPlayers, Save, Broadcast <msg>).
-  if (server && server.game === 'Palworld' && server.rconPassword) {
+  // Palworld/ASA don't read stdin — route console commands through RCON and echo
+  // the response (e.g. Info, ShowPlayers/ListPlayers, Save, Broadcast <msg>).
+  if (server && server.rconPassword && (server.game === 'Palworld' || server.game === 'Ark: Survival Ascended')) {
     const res = await rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, command);
     if (res === null) return { ok:false, error:'RCON command failed (is RCON up? restart the server once)' };
     log(id, 'dim', `[RCON] ${String(res).trim() || '(ok)'}`);
@@ -6032,6 +6032,18 @@ ipcMain.handle('palworld-broadcast', async (e, { serverId, message }) => {
   const res = await rconCommand('127.0.0.1', server.rconPort || 25575, server.rconPassword, `Broadcast ${msg.replace(/\s+/g, '_')}`);
   if (res === null) return { ok: false, error: 'Broadcast failed (is the server fully started?)' };
   log(serverId, 'info', `[Broadcast] ${msg}`);
+  return { ok: true };
+});
+
+// Ark: Survival Ascended — send a chat message to all players via RCON ServerChat.
+ipcMain.handle('ark-chat-send', async (e, { serverId, message }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server || server.game !== 'Ark: Survival Ascended') return { ok: false, error: 'Not an ASA server' };
+  if (!serverProcesses[serverId] || !server.rconPassword) return { ok: false, error: 'Server not running' };
+  const msg = String(message || '').trim();
+  if (!msg) return { ok: false, error: 'Empty message' };
+  const res = await rconCommand('127.0.0.1', server.rconPort || 27020, server.rconPassword, `ServerChat ${msg}`);
+  if (res === null) return { ok: false, error: 'Chat send failed (is the server fully started?)' };
   return { ok: true };
 });
 
@@ -6529,6 +6541,32 @@ async function pollArkPlayers(s) {
 // less-frequent polling + the in-flight/backoff guards above keep Omnex from
 // adding to the server's CPU spikes.
 setInterval(() => { for (const s of appData.servers) { pollPalworldPlayers(s); pollArkPlayers(s); } }, 45000);
+
+// Ark: Survival Ascended — poll RCON GetChat for new in-game chat (destructive read:
+// returns the buffer since the last call), route it to the Chat tab + Activity/Discord.
+const _arkChatInFlight = new Set();
+async function pollArkChat(s) {
+  if (!s || s.game !== 'Ark: Survival Ascended' || !serverProcesses[s.id] || !s.rconPassword) return;
+  if (_arkChatInFlight.has(s.id)) return;
+  _arkChatInFlight.add(s.id);
+  try {
+    const res = await rconCommand('127.0.0.1', s.rconPort || 27020, s.rconPassword, 'GetChat');
+    if (!res || /no response/i.test(res)) return; // empty buffer
+    for (const raw of res.split('\n')) {
+      const line = raw.trim();
+      if (!line || /no response/i.test(line)) continue;
+      if (/^SERVER:/i.test(line)) continue; // our own ServerChat broadcasts (already echoed)
+      const m = line.match(/^(.+?):\s(.+)$/);
+      const name = m ? m[1].trim() : '';
+      const msg  = m ? m[2].trim() : line;
+      emit('chat-message', { serverId: s.id, name, msg, ts: Date.now() });
+      recordActivity(s.id, 'chat', name ? `${name}: ${msg}` : msg, name);
+    }
+  } finally {
+    _arkChatInFlight.delete(s.id);
+  }
+}
+setInterval(() => { for (const s of appData.servers) pollArkChat(s); }, 10000);
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 function findExe(dir, name) {

@@ -61,6 +61,7 @@ contextBridge.exposeInMainWorld('nexus', {
 
   onConsoleLine:     (cb) => ipcRenderer.on('console-line',      (_, d) => cb(d)),
   onActivity:        (cb) => ipcRenderer.on('activity',          (_, d) => cb(d)),
+  onChatMessage:     (cb) => ipcRenderer.on('chat-message',      (_, d) => cb(d)),
   onEventLogged:     (cb) => ipcRenderer.on('event-logged',      (_, d) => cb(d)),
   onServerStopped:   (cb) => ipcRenderer.on('server-stopped',    (_, d) => cb(d)),
   onServerAdded:     (cb) => ipcRenderer.on('server-added',      (_, d) => cb(d)),
@@ -168,6 +169,7 @@ contextBridge.exposeInMainWorld('nexus', {
   terrariaRenderMap:     (serverId)          => ipcRenderer.invoke('terraria-render-map', serverId),
   terrariaMapInfo:       (serverId)          => ipcRenderer.invoke('terraria-map-info', serverId),
   palworldBroadcast:     (serverId, message) => ipcRenderer.invoke('palworld-broadcast', { serverId, message }),
+  arkChatSend:           (serverId, message) => ipcRenderer.invoke('ark-chat-send', { serverId, message }),
 
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),

@@ -393,6 +393,15 @@ async function sendChat() {
     } catch(e) { showToast('❌', e.message); }
     return;
   }
+  if (s.game === 'Ark: Survival Ascended') {
+    // Two-way: ServerChat sends; GetChat polling reads player messages back.
+    try {
+      const r = await window.nexus.arkChatSend(s.id, msg);
+      if (r && r.ok) appendChat('SERVER', msg, time);
+      else showToast('❌', (r && r.error) || 'Chat send failed');
+    } catch(e) { showToast('❌', e.message); }
+    return;
+  }
   try { await window.nexus.sendCommand(s.id, `say ${msg}`); } catch(e) {}
 }
 function handleChatKey(e) { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } }
@@ -1165,7 +1174,7 @@ async function selectServer(id) {
   const tabs = document.getElementById('serverTabs');
   if (tabs) tabs.style.display = (isMc || isFs || isTerraria || isPal || isAsa) ? 'flex' : 'none';
   const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria || isPal || isAsa) ? '' : 'none';
-  const bChat = document.getElementById('tabBtnChat');  if (bChat)  { bChat.style.display = (isMc || isTerraria || isPal) ? '' : 'none'; bChat.textContent = isPal ? 'Broadcast' : 'Chat'; }
+  const bChat = document.getElementById('tabBtnChat');  if (bChat)  { bChat.style.display = (isMc || isTerraria || isPal || isAsa) ? '' : 'none'; bChat.textContent = isPal ? 'Broadcast' : 'Chat'; }
   const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria || isPal || isAsa) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
@@ -1173,7 +1182,7 @@ async function selectServer(id) {
   const chatOut = document.getElementById('chatOutput');
   if (chatOut) chatOut.innerHTML = `<div class="empty-msg-sm" style="padding:12px">${isPal ? 'Send an announcement to all players. (Palworld can\'t relay players\' chat back.)' : 'No chat yet.'}</div>`;
   const chatIn = document.getElementById('chatInput');
-  if (chatIn) chatIn.placeholder = isPal ? 'Broadcast a message to all players…' : 'Send a message to players (say)...';
+  if (chatIn) chatIn.placeholder = isPal ? 'Broadcast a message to all players…' : 'Send a message to players…';
   try {
     const hist = await window.nexus.getConsole(id);
     if (id === activeId && Array.isArray(hist)) hist.forEach(l => appendLog(l.type, l.text, l.ts));
@@ -3538,6 +3547,7 @@ function wireEvents(){
   ['console-line','server-stopped','server-added','server-removed','server-status','install-complete','install-error','backup-created','console-progress','server-crashed','players-updated','settings-changed','app-update','update-status'].forEach(ch=>{try{window.nexus.removeAllListeners(ch);}catch(e){}});
   window.nexus.onConsoleLine(({serverId,type,text,ts})=>{if(serverId===activeId) appendLog(type,text,ts);});
   window.nexus.onActivity(({serverId,entry})=>{ if(serverId===activeId) appendActivity(entry); });
+  window.nexus.onChatMessage(({serverId,name,msg,ts})=>{ if(serverId===activeId) appendChat(name||'', msg, ts?new Date(ts).toLocaleTimeString('en-US',{hour12:false}):undefined); });
   try { window.nexus.onDiscordBotStatus(renderBotStatus); } catch(e) {}
   try { window.nexus.onDiscordBotLog(({msg, level}) => {
     const el = document.getElementById('botLogLine'); if (!el) return;
