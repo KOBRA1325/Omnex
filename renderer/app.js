@@ -1326,7 +1326,8 @@ function renderHeader() {
     // Show for every Minecraft server so it's discoverable; the browser itself
     // explains when a server (Vanilla) can't load mods. Also show for tModLoader.
     const isTml = s.game==='Terraria' && s.terrariaType==='tmodloader';
-    btnMods.style.display = (s.game==='Minecraft' || isTml) ? '' : 'none';
+    const isAsaMods = s.game==='Ark: Survival Ascended';
+    btnMods.style.display = (s.game==='Minecraft' || isTml || isAsaMods) ? '' : 'none';
     btnMods.disabled = false;
   }
   if(btnWS) btnWS.style.display = 'none';
@@ -2580,6 +2581,8 @@ async function openModManager(){
   const s=getActive(); if(!s) return;
   // tModLoader has its own (Steam Workshop) mod manager.
   if(s.game==='Terraria' && s.terrariaType==='tmodloader'){ openTmlMods(); return; }
+  // Ark: Survival Ascended has its own (CurseForge) mod manager.
+  if(s.game==='Ark: Survival Ascended'){ openAsaMods(); return; }
   // If the loader wasn't recorded, detect it from the install folder first.
   if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
     try { const r=await window.nexus.detectMcLoader(s.id); if(r&&r.detected&&r.loader){ s.mcType=r.loader; renderHeader(); } } catch(e){}
@@ -2823,6 +2826,144 @@ async function tmlDeleteMod(name){
   try { await window.nexus.tmlDeleteMod(s.id, name); showToast('🗑️','Mod removed'); }
   catch(e){ showToast('❌', e.message); }
   renderTmlMods();
+}
+
+// ── Ark: Survival Ascended mods (CurseForge) ────────────────────────────────────
+let asaInstalledIds = new Set(); // CurseForge IDs installed on the active server (for Browse badges)
+let _asaHasKey = false;
+
+function openAsaMods(){
+  const s=getActive(); if(!s) return;
+  const t=document.getElementById('asaModTitle'); if(t) t.textContent=s.name;
+  const q=document.getElementById('asaSearchQuery'); if(q) q.value='';
+  const a=document.getElementById('asaAddInput'); if(a) a.value='';
+  showModal('asaModModal');
+  asaSwitchTab('browse');
+  renderAsaMods(); // loads installed + hasKey
+  asaBrowse();
+}
+function closeAsaMods(){ hideModal('asaModModal'); }
+function asaSwitchTab(tab){
+  const b=document.getElementById('asaBrowsePane'), i=document.getElementById('asaInstalledPane');
+  const tb=document.getElementById('asaTabBrowse'), ti=document.getElementById('asaTabInstalled');
+  const browse = tab==='browse';
+  if(b) b.style.display = browse?'':'none';
+  if(i) i.style.display = browse?'none':'';
+  if(tb) tb.classList.toggle('active', browse);
+  if(ti) ti.classList.toggle('active', !browse);
+  if(!browse) renderAsaMods();
+}
+
+let _asaSearchTimer=null;
+function onAsaSearchInput(){ clearTimeout(_asaSearchTimer); _asaSearchTimer=setTimeout(asaBrowse, 350); }
+
+async function asaBrowse(){
+  const s=getActive(); if(!s) return;
+  const grid=document.getElementById('asaBrowseResults'); if(!grid) return;
+  const query=document.getElementById('asaSearchQuery')?.value.trim()||'';
+  grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Searching CurseForge…</div>';
+  try {
+    const r=await window.nexus.curseforgeSearch({ query });
+    const setup=document.getElementById('asaKeySetup'), toolbar=document.getElementById('asaBrowseToolbar');
+    if(r && r.error==='no-key'){
+      if(setup) setup.style.display='';
+      if(toolbar) toolbar.style.display='none';
+      grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Add a CurseForge API key above to browse mods — or use the <b>Installed</b> tab to add by Project ID.</div>';
+      return;
+    }
+    if(setup) setup.style.display='none';
+    if(toolbar) toolbar.style.display='';
+    if(!r || !r.ok){ grid.innerHTML=`<div class="empty-msg-sm" style="padding:20px">Search failed.${r&&r.error?'<br><span style="opacity:.7">'+escapeHtml(r.error)+'</span>':''}</div>`; return; }
+    if(!r.mods.length){ grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">No mods found. Try another search.</div>'; return; }
+    grid.innerHTML=r.mods.map(asaModCardHtml).join('');
+  } catch(e){ grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Search failed.</div>'; }
+}
+function asaModCardHtml(m){
+  const installed = asaInstalledIds.has(String(m.id));
+  const d=m.downloads||0; const dls = d>=1e6 ? (d/1e6).toFixed(1)+'M' : d>=1000 ? (d/1000).toFixed(d>=1e5?0:1)+'k' : String(d);
+  const jt=escapeHtml(m.name||'').replace(/'/g,"\\'");
+  return `<div class="mod-card">
+    <div class="mod-card-top">
+      <div class="mod-card-icon">${m.logo?`<img src="${escapeHtml(m.logo)}" alt="" onerror="this.parentNode.textContent='🦖'">`:'🦖'}</div>
+      <div class="mod-card-head">
+        <div class="mod-card-title" title="${escapeHtml(m.name||'')}">${escapeHtml(m.name||'')}</div>
+        <div class="mod-card-author">by ${escapeHtml(m.author||'?')}</div>
+      </div>
+    </div>
+    <div class="mod-card-desc">${escapeHtml((m.summary||'').slice(0,110))}</div>
+    <div class="mod-card-cats"></div>
+    <div class="mod-card-foot">
+      <span class="mod-card-dls">⬇ ${dls}</span>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="asaInstallFromBrowse('${m.id}','${jt}', this)">${installed?'✓ Added':'Add'}</button>
+    </div>
+  </div>`;
+}
+async function asaInstallFromBrowse(id, name, btn){
+  const s=getActive(); if(!s) return;
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  try {
+    const r=await window.nexus.arkAddMod(s.id, String(id));
+    if(r&&r.ok){ showToast('✅', `${name} added — restart to download`); asaInstalledIds.add(String(id)); if(btn){ btn.classList.add('installed'); btn.textContent='✓ Added'; btn.disabled=true; } }
+    else { showToast('❌', (r&&r.error)||'Add failed'); if(btn){ btn.disabled=false; btn.textContent='Add'; } }
+  } catch(e){ showToast('❌', e.message); if(btn){ btn.disabled=false; btn.textContent='Add'; } }
+}
+
+async function renderAsaMods(){
+  const s=getActive(); if(!s) return;
+  const list=document.getElementById('asaModList'); if(!list) return;
+  try {
+    const r=await window.nexus.arkListMods(s.id) || {};
+    const mods=r.mods||[]; _asaHasKey=!!r.hasKey;
+    asaInstalledIds=new Set(mods.map(m=>String(m.id)));
+    const cnt=document.getElementById('asaModCount'); if(cnt) cnt.textContent = mods.length?`(${mods.length})`:'';
+    if(!mods.length){ list.innerHTML='<div class="empty-msg-sm" style="padding:12px">No mods yet. Add one from Browse, or paste a Project ID above.</div>'; return; }
+    list.innerHTML = mods.map((m,idx)=>{
+      const jid=String(m.id).replace(/'/g,"\\'");
+      return `<div class="mod-installed-item">
+        <label class="tml-mod-toggle" title="${m.enabled!==false?'Enabled':'Disabled'}"><input type="checkbox" ${m.enabled!==false?'checked':''} onchange="asaToggleMod('${jid}', this.checked)"></label>
+        <div class="mod-installed-name" title="${escapeHtml(m.name||m.id)}" style="${m.enabled!==false?'':'opacity:.5'}">${escapeHtml(m.name||('Mod '+m.id))}${m.url?` <a href="#" onclick="window.nexus.openExternal('${String(m.url).replace(/'/g,'%27')}');return false" title="View on CurseForge" style="color:var(--text-dim);text-decoration:none">↗</a>`:''}</div>
+        <div class="mod-installed-meta" style="font-family:'Share Tech Mono',monospace">#${m.id}</div>
+        <button class="mod-remove-btn" title="Move up" ${idx===0?'disabled style=opacity:.3':''} onclick="asaMoveMod('${jid}','up')">▲</button>
+        <button class="mod-remove-btn" title="Move down" ${idx===mods.length-1?'disabled style=opacity:.3':''} onclick="asaMoveMod('${jid}','down')">▼</button>
+        <button class="mod-remove-btn" title="Remove" onclick="asaRemoveMod('${jid}')">🗑</button>
+      </div>`;
+    }).join('');
+  } catch(e){ list.innerHTML='<div class="empty-msg-sm">Could not load mods.</div>'; }
+}
+async function asaAddMod(){
+  const s=getActive(); if(!s) return;
+  const inp=document.getElementById('asaAddInput'), btn=document.getElementById('asaAddBtn');
+  const val=(inp?.value||'').trim(); if(!val){ showToast('ℹ️','Paste a CurseForge Project ID or mod link.'); return; }
+  if(btn){ btn.disabled=true; btn.textContent='…'; }
+  try {
+    const r=await window.nexus.arkAddMod(s.id, val);
+    if(r&&r.ok){ showToast('✅', `${r.name||'Mod'} added — restart to download`); if(inp) inp.value=''; renderAsaMods(); }
+    else showToast('❌', (r&&r.error)||'Add failed');
+  } catch(e){ showToast('❌', e.message); }
+  if(btn){ btn.disabled=false; btn.textContent='➕ Add'; }
+}
+async function asaToggleMod(id, enabled){
+  const s=getActive(); if(!s) return;
+  try { await window.nexus.arkToggleMod(s.id, id, enabled); } catch(e){ showToast('❌', e.message); }
+  renderAsaMods();
+}
+async function asaRemoveMod(id){
+  const s=getActive(); if(!s||!confirm('Remove this mod?')) return;
+  try { await window.nexus.arkRemoveMod(s.id, id); showToast('🗑️','Mod removed'); } catch(e){ showToast('❌', e.message); }
+  renderAsaMods();
+}
+async function asaMoveMod(id, dir){
+  const s=getActive(); if(!s) return;
+  try { await window.nexus.arkMoveMod(s.id, id, dir); } catch(e){ showToast('❌', e.message); }
+  renderAsaMods();
+}
+async function saveCfKey(){
+  const inp=document.getElementById('asaKeyInput'); const key=(inp?.value||'').trim();
+  if(!key){ showToast('ℹ️','Paste your CurseForge API key first.'); return; }
+  appSettings.curseforgeApiKey = key;
+  try { await window.nexus.saveSettings(appSettings); } catch(e){}
+  showToast('🔑','CurseForge key saved');
+  asaBrowse();
 }
 
 // ── Mod detail ("read more") ──────────────────────────────────────────────────

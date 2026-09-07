@@ -170,6 +170,12 @@ contextBridge.exposeInMainWorld('nexus', {
   terrariaMapInfo:       (serverId)          => ipcRenderer.invoke('terraria-map-info', serverId),
   palworldBroadcast:     (serverId, message) => ipcRenderer.invoke('palworld-broadcast', { serverId, message }),
   arkChatSend:           (serverId, message) => ipcRenderer.invoke('ark-chat-send', { serverId, message }),
+  arkListMods:           (serverId)          => ipcRenderer.invoke('ark-list-mods', serverId),
+  arkAddMod:             (serverId, input)   => ipcRenderer.invoke('ark-add-mod', { serverId, input }),
+  arkRemoveMod:          (serverId, id)      => ipcRenderer.invoke('ark-remove-mod', { serverId, id }),
+  arkToggleMod:          (serverId, id, enabled) => ipcRenderer.invoke('ark-toggle-mod', { serverId, id, enabled }),
+  arkMoveMod:            (serverId, id, dir) => ipcRenderer.invoke('ark-move-mod', { serverId, id, dir }),
+  curseforgeSearch:      (opts)              => ipcRenderer.invoke('curseforge-search', opts),
 
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),

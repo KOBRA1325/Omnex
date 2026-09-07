@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' file: https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com https://images.steamusercontent.com data:; frame-src 'self' http: https:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' file: https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com https://images.steamusercontent.com https://media.forgecdn.net data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -734,6 +734,59 @@
         <div class="empty-msg-sm">Loading…</div>
       </div>
       <div class="empty-msg-sm" style="padding:8px 2px 0; line-height:1.5"><b>Restart the server</b> for mod changes to take effect.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ARK: SURVIVAL ASCENDED MODS MODAL -->
+<div class="modal-overlay" id="asaModModal">
+  <div class="modal modal-tall" style="width:min(860px, 95vw)">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>🦖 &nbsp;ARK Mods · <span id="asaModTitle"></span></span>
+      <button class="btn-modal-cancel" onclick="closeAsaMods()">✕ Close</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mod-typetoggle" style="margin-bottom:10px">
+      <button id="asaTabBrowse" class="mod-type active" onclick="asaSwitchTab('browse')">🔎 Browse</button>
+      <button id="asaTabInstalled" class="mod-type" onclick="asaSwitchTab('installed')">📦 Installed <span id="asaModCount" style="opacity:.7"></span></button>
+    </div>
+
+    <!-- BROWSE -->
+    <div id="asaBrowsePane">
+      <!-- API-key setup (shown when no key) -->
+      <div id="asaKeySetup" style="display:none; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px">
+        <div class="config-group-label" style="margin-top:0">🔑 CurseForge API key required to browse</div>
+        <div class="empty-msg-sm" style="padding:2px 0 10px; line-height:1.6; text-align:left">
+          CurseForge needs a free personal API key to search mods in-app. Get one at
+          <button class="mod-link" onclick="window.nexus.openExternal('https://console.curseforge.com/')">console.curseforge.com</button>
+          → API Keys, then paste it here. (You can always add mods by Project ID without a key.)
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <input class="form-input" id="asaKeyInput" type="password" placeholder="Paste CurseForge API key…" style="flex:1; pointer-events:all">
+          <button class="btn btn-primary" style="pointer-events:all" onclick="saveCfKey()">Save key</button>
+        </div>
+      </div>
+      <div class="mod-toolbar" id="asaBrowseToolbar" style="margin-bottom:10px">
+        <input class="form-input" id="asaSearchQuery" placeholder="Search ARK mods on CurseForge…" oninput="onAsaSearchInput()" style="flex:1; pointer-events:all" />
+      </div>
+      <div class="mod-grid" id="asaBrowseResults" style="max-height:52vh; overflow:auto">
+        <div class="empty-msg-sm" style="padding:20px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- INSTALLED -->
+    <div id="asaInstalledPane" style="display:none">
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px">
+        <input class="form-input" id="asaAddInput" style="flex:1; pointer-events:all"
+          placeholder="CurseForge Project ID (number) or mod link…"
+          onkeydown="if(event.key==='Enter')asaAddMod()" />
+        <button class="btn btn-primary" id="asaAddBtn" style="pointer-events:all" onclick="asaAddMod()">➕ Add</button>
+      </div>
+      <div class="mod-installed-list" id="asaModList" style="max-height:46vh; overflow:auto">
+        <div class="empty-msg-sm">Loading…</div>
+      </div>
+      <div class="empty-msg-sm" style="padding:8px 2px 0; line-height:1.5">Load order is top→bottom (later mods override earlier). <b>Restart the server</b> to download &amp; apply changes.</div>
     </div>
   </div>
 </div>

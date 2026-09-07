@@ -297,6 +297,9 @@ const GAME_DEFS = {
       `${map}?listen?Port=${s.port||7777}?RCONEnabled=True?RCONPort=${s.rconPort||27020}?ServerAdminPassword=${pw}`,
       '-server', '-log', `-WinLiveMaxPlayers=${s.maxPlayers||70}`,
     ];
+    // CurseForge mods: the server auto-downloads each ID in -mods (order = load order).
+    const mods = (s.arkMods || []).filter(m => m && m.id && m.enabled !== false).map(m => m.id).join(',');
+    if (mods) args.push(`-mods=${mods}`);
     if (s.noBattlEye) args.push('-NoBattlEye');
     return args;
   } },
@@ -3453,6 +3456,7 @@ function loadSettings() {
     maxConsoleLines:     500,
     defaultBackupKeep:   10,
     remoteHttps:         false, // serve the Remote Access panel over HTTPS (self-signed)
+    curseforgeApiKey:    '',    // user's own CurseForge API key (for the ASA mod browser)
     autoStartServers:    [],
     theme:               'dark',
     accentColor:         '#00e5ff',  // app highlight color (themable)
@@ -6059,6 +6063,95 @@ ipcMain.handle('ark-chat-send', async (e, { serverId, message }) => {
   const res = await rconCommand('127.0.0.1', server.rconPort || 27020, server.rconPassword, `ServerChat ${msg}`);
   if (res === null) return { ok: false, error: 'Chat send failed (is the server fully started?)' };
   return { ok: true };
+});
+
+// ── Ark: Survival Ascended mods (CurseForge) ────────────────────────────────────
+// Mods are CurseForge project IDs added to -mods= (the server auto-downloads them).
+// Managing the list is keyless; browsing/search + resolving links needs the user's
+// own CurseForge API key (api.curseforge.com requires one, can't be shipped in-app).
+const CF_ASA_GAME_ID = 83374; // CurseForge gameId for Ark: Survival Ascended
+function cfApi(pathQ) {
+  return new Promise((resolve, reject) => {
+    const key = String(appSettings.curseforgeApiKey || '').trim();
+    if (!key) return reject(new Error('no-key'));
+    const req = https.request({ host: 'api.curseforge.com', path: pathQ, method: 'GET', headers: { 'x-api-key': key, 'Accept': 'application/json' }, timeout: 10000 }, res => {
+      let b = ''; res.on('data', d => b += d);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) { try { resolve(JSON.parse(b)); } catch (e) { reject(new Error('Bad response from CurseForge')); } }
+        else if (res.statusCode === 401 || res.statusCode === 403) reject(new Error('Invalid CurseForge API key'));
+        else reject(new Error('CurseForge HTTP ' + res.statusCode));
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('CurseForge request timed out')); });
+    req.end();
+  });
+}
+function parseCfInput(input) {
+  const s = String(input || '').trim();
+  if (/^\d{2,10}$/.test(s)) return { id: s };
+  const m = s.match(/curseforge\.com\/ark-survival-ascended\/mods\/([^/?#]+)/i);
+  if (m) return { slug: m[1] };
+  if (/^[a-z0-9][a-z0-9-]*$/i.test(s)) return { slug: s };
+  return {};
+}
+ipcMain.handle('ark-list-mods', (e, serverId) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  return { mods: (s && s.arkMods) || [], hasKey: !!String(appSettings.curseforgeApiKey || '').trim() };
+});
+ipcMain.handle('ark-add-mod', async (e, { serverId, input }) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s || s.game !== 'Ark: Survival Ascended') return { ok: false, error: 'Not an ASA server' };
+  let { id, slug } = parseCfInput(input);
+  let name = '', url = '';
+  if (!id && slug) {
+    if (!String(appSettings.curseforgeApiKey || '').trim())
+      return { ok: false, error: 'To add by link, set a CurseForge API key (Browse tab). Or paste the numeric Project ID from the mod page.' };
+    try { const r = await cfApi(`/v1/mods/search?gameId=${CF_ASA_GAME_ID}&slug=${encodeURIComponent(slug)}`); const mod = (r.data || [])[0]; if (mod) { id = String(mod.id); name = mod.name; url = (mod.links && mod.links.websiteUrl) || ''; } } catch (err) { return { ok: false, error: err.message }; }
+    if (!id) return { ok: false, error: 'Could not find that mod on CurseForge.' };
+  }
+  if (!id) return { ok: false, error: 'Enter a CurseForge Project ID (number) or mod link.' };
+  if ((!name || !url) && String(appSettings.curseforgeApiKey || '').trim()) { try { const r = await cfApi(`/v1/mods/${id}`); if (r.data) { name = name || r.data.name; url = url || (r.data.links && r.data.links.websiteUrl) || ''; } } catch (e) {} }
+  s.arkMods = s.arkMods || [];
+  if (s.arkMods.some(m => m.id === id)) return { ok: false, error: 'That mod is already added.' };
+  s.arkMods.push({ id, name: name || ('Mod ' + id), enabled: true, url: url || '' });
+  saveData();
+  return { ok: true, mods: s.arkMods, name: name || id };
+});
+ipcMain.handle('ark-remove-mod', (e, { serverId, id }) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s) return { ok: false, error: 'Server not found' };
+  s.arkMods = (s.arkMods || []).filter(m => m.id !== id); saveData();
+  return { ok: true, mods: s.arkMods };
+});
+ipcMain.handle('ark-toggle-mod', (e, { serverId, id, enabled }) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s) return { ok: false, error: 'Server not found' };
+  const m = (s.arkMods || []).find(m => m.id === id); if (m) m.enabled = !!enabled; saveData();
+  return { ok: true, mods: s.arkMods };
+});
+ipcMain.handle('ark-move-mod', (e, { serverId, id, dir }) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s || !s.arkMods) return { ok: false, error: 'Server not found' };
+  const i = s.arkMods.findIndex(m => m.id === id);
+  const j = i + (dir === 'up' ? -1 : 1);
+  if (i > -1 && j >= 0 && j < s.arkMods.length) { const t = s.arkMods[i]; s.arkMods[i] = s.arkMods[j]; s.arkMods[j] = t; saveData(); }
+  return { ok: true, mods: s.arkMods };
+});
+ipcMain.handle('curseforge-search', async (e, { query = '' } = {}) => {
+  try {
+    const q = String(query || '').trim();
+    const params = `gameId=${CF_ASA_GAME_ID}&pageSize=30&sortField=${q ? 1 : 2}&sortOrder=desc${q ? `&searchFilter=${encodeURIComponent(q)}` : ''}`;
+    const r = await cfApi(`/v1/mods/search?${params}`);
+    const mods = (r.data || []).map(m => ({
+      id: String(m.id), name: m.name || '', summary: m.summary || '',
+      logo: (m.logo && m.logo.thumbnailUrl) || (m.logo && m.logo.url) || '',
+      downloads: m.downloadCount || 0, author: (m.authors && m.authors[0] && m.authors[0].name) || '',
+    }));
+    return { ok: true, mods };
+  } catch (err) {
+    return { ok: false, error: err.message === 'no-key' ? 'no-key' : err.message };
+  }
 });
 
 // ── RCON (Source protocol) — graceful Palworld shutdown + live player counts ──
