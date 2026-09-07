@@ -269,11 +269,13 @@ function switchServerTab(tab) {
     const s = getActive();
     const isTerraria = !!(s && s.game === 'Terraria');
     const isPal = !!(s && s.game === 'Palworld');
-    const mc = document.getElementById('mapMc'), tr = document.getElementById('mapTerraria'), pal = document.getElementById('mapPalworld');
-    if (mc) mc.style.display = (isTerraria || isPal) ? 'none' : 'flex';
+    const isAsa = !!(s && s.game === 'Ark: Survival Ascended');
+    const mc = document.getElementById('mapMc'), tr = document.getElementById('mapTerraria'), pal = document.getElementById('mapPalworld'), asa = document.getElementById('mapAsa');
+    if (mc) mc.style.display = (isTerraria || isPal || isAsa) ? 'none' : 'flex';
     if (tr) tr.style.display = isTerraria ? 'flex' : 'none';
     if (pal) pal.style.display = isPal ? 'flex' : 'none';
-    if (isTerraria) updateTerrariaMap(); else if (isPal) updatePalMap(); else updateMapView();
+    if (asa) asa.style.display = isAsa ? 'flex' : 'none';
+    if (isTerraria) updateTerrariaMap(); else if (isPal) updatePalMap(); else if (isAsa) updateAsaMap(); else updateMapView();
   }
   if (tab === 'panel')    { updatePanelView(); }
   if (tab === 'chat')     { const o = document.getElementById('chatOutput'); if (o) o.scrollTop = o.scrollHeight; }
@@ -441,6 +443,39 @@ function openMapExternal() {
 // ── Palworld map (embedded palworld.gg — general reference map) ─────────────────
 function updatePalMap() { const f = document.getElementById('mapPalFrame'); if (f && !f.getAttribute('src')) f.setAttribute('src', 'https://palworld.gg/map'); }
 function reloadPalMap() { const f = document.getElementById('mapPalFrame'); if (f) f.setAttribute('src', 'https://palworld.gg/map?t=' + Date.now()); }
+
+// ── Ark: Survival Ascended map (embedded wikily.gg, auto-selected to the server's map) ──
+// Maps the launch map name (…_WP) to wikily.gg's URL slug.
+const ARK_WP_TO_SLUG = {
+  'TheIsland_WP':'the-island', 'ScorchedEarth_WP':'scorched-earth', 'TheCenter_WP':'the-center',
+  'Aberration_WP':'aberration', 'Extinction_WP':'extinction', 'Ragnarok_WP':'ragnarok',
+  'Astraeos_WP':'astraeos', 'Svartalfheim_WP':'svartalfheim', 'Genesis_WP':'genesis',
+  'Valguero_WP':'valguero', 'Genesis2_WP':'genesis', 'CrystalIsles_WP':'crystal-isles',
+};
+function asaMapUrl() {
+  const s = getActive();
+  const mapName = (s && s.arkMap) || 'TheIsland_WP';
+  const slug = ARK_WP_TO_SLUG[mapName] || 'the-island';
+  return { url: 'https://wikily.gg/ark-survival-ascended/maps/' + slug + '/', slug };
+}
+function updateAsaMap() {
+  const f = document.getElementById('mapAsaFrame'); if (!f) return;
+  const s = getActive();
+  const sel = document.getElementById('asaMapSelect');
+  if (sel) sel.value = (s && s.arkMap) || 'TheIsland_WP';
+  const { url, slug } = asaMapUrl();
+  // Load (or switch to) the server's current map only when it changes.
+  if (f.getAttribute('data-slug') !== slug) { f.setAttribute('data-slug', slug); f.setAttribute('src', url); }
+}
+function reloadAsaMap() { const f = document.getElementById('mapAsaFrame'); if (f) { f.removeAttribute('data-slug'); f.setAttribute('src', asaMapUrl().url + '?t=' + Date.now()); } }
+function asaMapOpenExternal() { try { window.nexus.openExternal(asaMapUrl().url); } catch (e) {} }
+async function setAsaMap(name) {
+  const s = getActive(); if (!s) return;
+  s.arkMap = name;
+  try { await window.nexus.setServerField(s.id, 'arkMap', name); } catch (e) {}
+  updateAsaMap();
+  showToast('🗺️', 'Map set to ' + name.replace('_WP', '') + ' — restart the server to apply it in-game');
+}
 
 // ── Terraria world map (rendered from the .wld, pan/zoom image) ─────────────────
 let tmap = { scale: 1, tx: 0, ty: 0, natW: 0, natH: 0 };
@@ -1131,7 +1166,7 @@ async function selectServer(id) {
   if (tabs) tabs.style.display = (isMc || isFs || isTerraria || isPal || isAsa) ? 'flex' : 'none';
   const bAct  = document.getElementById('tabBtnActivity'); if (bAct) bAct.style.display = (isMc || isTerraria || isPal || isAsa) ? '' : 'none';
   const bChat = document.getElementById('tabBtnChat');  if (bChat)  { bChat.style.display = (isMc || isTerraria || isPal) ? '' : 'none'; bChat.textContent = isPal ? 'Broadcast' : 'Chat'; }
-  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria || isPal) ? '' : 'none';
+  const bMap  = document.getElementById('tabBtnMap');   if (bMap)   bMap.style.display   = (isMc || isTerraria || isPal || isAsa) ? '' : 'none';
   const bPanel= document.getElementById('tabBtnPanel'); if (bPanel) bPanel.style.display = isFs ? '' : 'none';
   switchServerTab('console');
   if (isMc || isTerraria || isPal || isAsa) loadActivity(id);

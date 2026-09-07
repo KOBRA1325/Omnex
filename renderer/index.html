@@ -270,6 +270,26 @@
               <iframe id="mapPalFrame" title="Palworld Map" style="width:100%; height:100%; border:0; background:#0a0c10"></iframe>
             </div>
           </div>
+          <!-- Ark: Survival Ascended map (embedded wikily.gg, auto-selected to the server's map) -->
+          <div id="mapAsa" style="display:none; flex-direction:column; flex:1; min-height:0">
+            <div class="map-modebar">
+              <span style="font-size:12px; color:var(--text-dim); display:flex; align-items:center; padding:0 4px">🗺 wikily.gg</span>
+              <select class="config-input" id="asaMapSelect" onchange="setAsaMap(this.value)" style="pointer-events:all; width:170px">
+                <option value="TheIsland_WP">The Island</option>
+                <option value="ScorchedEarth_WP">Scorched Earth</option>
+                <option value="TheCenter_WP">The Center</option>
+                <option value="Aberration_WP">Aberration</option>
+                <option value="Extinction_WP">Extinction</option>
+                <option value="Ragnarok_WP">Ragnarok</option>
+                <option value="Astraeos_WP">Astraeos</option>
+              </select>
+              <button class="server-tab" onclick="reloadAsaMap()">Reload</button>
+              <button class="server-tab" id="asaMapExtBtn" style="margin-left:auto" onclick="asaMapOpenExternal()" title="Open in browser">↗</button>
+            </div>
+            <div style="position:relative; flex:1; min-height:0; background:#0a0c10">
+              <iframe id="mapAsaFrame" title="ARK Map" style="width:100%; height:100%; border:0; background:#0a0c10"></iframe>
+            </div>
+          </div>
         </div>
 
         <!-- Web Admin tab (Farming Simulator 25): embed the dedicated-server panel -->
