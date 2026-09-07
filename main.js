@@ -6150,7 +6150,8 @@ ipcMain.handle('curseforge-search', async (e, { query = '' } = {}) => {
     }));
     return { ok: true, mods };
   } catch (err) {
-    return { ok: false, error: err.message === 'no-key' ? 'no-key' : err.message };
+    const code = err.message === 'no-key' ? 'no-key' : /invalid/i.test(err.message) ? 'bad-key' : err.message;
+    return { ok: false, error: code };
   }
 });
 

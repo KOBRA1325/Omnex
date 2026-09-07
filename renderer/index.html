@@ -754,17 +754,24 @@
 
     <!-- BROWSE -->
     <div id="asaBrowsePane">
-      <!-- API-key setup (shown when no key) -->
-      <div id="asaKeySetup" style="display:none; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px">
-        <div class="config-group-label" style="margin-top:0">🔑 CurseForge API key required to browse</div>
-        <div class="empty-msg-sm" style="padding:2px 0 10px; line-height:1.6; text-align:left">
-          CurseForge needs a free personal API key to search mods in-app. Get one at
-          <button class="mod-link" onclick="window.nexus.openExternal('https://console.curseforge.com/')">console.curseforge.com</button>
-          → API Keys, then paste it here. (You can always add mods by Project ID without a key.)
+      <!-- API-key setup (shown when no key / bad key) -->
+      <div id="asaKeySetup" style="display:none; background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:12px">
+        <div class="config-group-label" style="margin-top:0">🔑 One-time setup to browse mods</div>
+        <div class="empty-msg-sm" style="padding:2px 0 12px; line-height:1.65; text-align:left">
+          Unlike Minecraft/Terraria, CurseForge needs a <b>free personal API key</b> to search mods in-app. It's a ~2-minute, one-time step — after that, browse &amp; install works just like the other games.
+          <ol style="margin:10px 0 0 18px; padding:0; line-height:1.8">
+            <li>Open <button class="mod-link" onclick="window.nexus.openExternal('https://console.curseforge.com/#/api-keys')">console.curseforge.com → API Keys</button> and sign in (free).</li>
+            <li>Copy your API key.</li>
+            <li>Paste it below and hit <b>Save &amp; verify</b>.</li>
+          </ol>
         </div>
         <div style="display:flex; gap:8px; align-items:center">
-          <input class="form-input" id="asaKeyInput" type="password" placeholder="Paste CurseForge API key…" style="flex:1; pointer-events:all">
-          <button class="btn btn-primary" style="pointer-events:all" onclick="saveCfKey()">Save key</button>
+          <input class="form-input" id="asaKeyInput" type="password" placeholder="Paste CurseForge API key…" onkeydown="if(event.key==='Enter')saveCfKey()" style="flex:1; pointer-events:all">
+          <button class="btn btn-primary" id="asaKeySaveBtn" style="pointer-events:all; white-space:nowrap" onclick="saveCfKey()">Save &amp; verify</button>
+        </div>
+        <div id="asaKeyNote" style="font-size:11px; margin-top:8px; min-height:14px"></div>
+        <div class="empty-msg-sm" style="padding:10px 0 0; line-height:1.5; text-align:left; opacity:.8">
+          Don't want a key? You can still add any mod by its <b>Project ID</b> in the <b>Installed</b> tab — no key needed.
         </div>
       </div>
       <div class="mod-toolbar" id="asaBrowseToolbar" style="margin-bottom:10px">

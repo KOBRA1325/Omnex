@@ -2865,9 +2865,11 @@ async function asaBrowse(){
   try {
     const r=await window.nexus.curseforgeSearch({ query });
     const setup=document.getElementById('asaKeySetup'), toolbar=document.getElementById('asaBrowseToolbar');
-    if(r && r.error==='no-key'){
+    if(r && (r.error==='no-key' || r.error==='bad-key')){
       if(setup) setup.style.display='';
       if(toolbar) toolbar.style.display='none';
+      const note=document.getElementById('asaKeyNote');
+      if(note) note.innerHTML = r.error==='bad-key' ? '<span style="color:var(--red)">That key didn\'t work — double-check it and paste again.</span>' : '';
       grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Add a CurseForge API key above to browse mods — or use the <b>Installed</b> tab to add by Project ID.</div>';
       return;
     }
@@ -2958,12 +2960,26 @@ async function asaMoveMod(id, dir){
   renderAsaMods();
 }
 async function saveCfKey(){
-  const inp=document.getElementById('asaKeyInput'); const key=(inp?.value||'').trim();
-  if(!key){ showToast('ℹ️','Paste your CurseForge API key first.'); return; }
+  const inp=document.getElementById('asaKeyInput'); const btn=document.getElementById('asaKeySaveBtn'); const note=document.getElementById('asaKeyNote');
+  const key=(inp?.value||'').trim();
+  if(!key){ if(note) note.innerHTML='<span style="color:var(--red)">Paste your key first.</span>'; return; }
+  if(btn){ btn.disabled=true; btn.textContent='Verifying…'; }
+  if(note) note.innerHTML='<span style="color:var(--text-dim)">Checking key…</span>';
+  const prev=appSettings.curseforgeApiKey;
   appSettings.curseforgeApiKey = key;
   try { await window.nexus.saveSettings(appSettings); } catch(e){}
-  showToast('🔑','CurseForge key saved');
-  asaBrowse();
+  // Verify by doing a real search.
+  let ok=false;
+  try { const r=await window.nexus.curseforgeSearch({ query:'' }); ok = !!(r && r.ok); if(!ok && r && r.error && r.error!=='bad-key' && r.error!=='no-key'){ if(note) note.innerHTML='<span style="color:var(--red)">'+escapeHtml(r.error)+'</span>'; } }
+  catch(e){}
+  if(btn){ btn.disabled=false; btn.textContent='Save & verify'; }
+  if(ok){ showToast('✅','CurseForge key verified — browsing mods'); asaBrowse(); }
+  else {
+    // Roll back an invalid key so we don't leave a broken one saved.
+    appSettings.curseforgeApiKey = prev || '';
+    try { await window.nexus.saveSettings(appSettings); } catch(e){}
+    if(note && !note.innerHTML.trim()) note.innerHTML='<span style="color:var(--red)">That key didn\'t work — double-check it and try again.</span>';
+  }
 }
 
 // ── Mod detail ("read more") ──────────────────────────────────────────────────
