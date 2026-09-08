@@ -6074,16 +6074,18 @@ function cfApi(pathQ) {
   return new Promise((resolve, reject) => {
     const key = String(appSettings.curseforgeApiKey || '').trim();
     if (!key) return reject(new Error('no-key'));
-    const req = https.request({ host: 'api.curseforge.com', path: pathQ, method: 'GET', headers: { 'x-api-key': key, 'Accept': 'application/json' }, timeout: 10000 }, res => {
+    let settled = false;
+    const done = (fn) => { if (settled) return; settled = true; fn(); };
+    const req = https.request({ host: 'api.curseforge.com', path: pathQ, method: 'GET', headers: { 'x-api-key': key, 'Accept': 'application/json' } }, res => {
       let b = ''; res.on('data', d => b += d);
-      res.on('end', () => {
+      res.on('end', () => done(() => {
         if (res.statusCode >= 200 && res.statusCode < 300) { try { resolve(JSON.parse(b)); } catch (e) { reject(new Error('Bad response from CurseForge')); } }
         else if (res.statusCode === 401 || res.statusCode === 403) reject(new Error('Invalid CurseForge API key'));
         else reject(new Error('CurseForge HTTP ' + res.statusCode));
-      });
+      }));
     });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('CurseForge request timed out')); });
+    req.setTimeout(9000, () => req.destroy(new Error('CurseForge request timed out')));
+    req.on('error', err => done(() => reject(err)));
     req.end();
   });
 }

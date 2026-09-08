@@ -2961,24 +2961,36 @@ async function asaMoveMod(id, dir){
 }
 async function saveCfKey(){
   const inp=document.getElementById('asaKeyInput'); const btn=document.getElementById('asaKeySaveBtn'); const note=document.getElementById('asaKeyNote');
+  const setNote=(html)=>{ if(note) note.innerHTML=html; };
   const key=(inp?.value||'').trim();
-  if(!key){ if(note) note.innerHTML='<span style="color:var(--red)">Paste your key first.</span>'; return; }
+  if(!key){ setNote('<span style="color:var(--red)">Paste your key first.</span>'); return; }
   if(btn){ btn.disabled=true; btn.textContent='Verifying…'; }
-  if(note) note.innerHTML='<span style="color:var(--text-dim)">Checking key…</span>';
+  setNote('<span style="color:var(--text-dim)">Checking key…</span>');
   const prev=appSettings.curseforgeApiKey;
   appSettings.curseforgeApiKey = key;
   try { await window.nexus.saveSettings(appSettings); } catch(e){}
-  // Verify by doing a real search.
-  let ok=false;
-  try { const r=await window.nexus.curseforgeSearch({ query:'' }); ok = !!(r && r.ok); if(!ok && r && r.error && r.error!=='bad-key' && r.error!=='no-key'){ if(note) note.innerHTML='<span style="color:var(--red)">'+escapeHtml(r.error)+'</span>'; } }
-  catch(e){}
+  // Verify with a real search — hard-capped so the UI can never hang.
+  let r;
+  try {
+    r = await Promise.race([
+      window.nexus.curseforgeSearch({ query:'' }),
+      new Promise(res => setTimeout(() => res({ ok:false, error:'timeout' }), 15000)),
+    ]);
+  } catch(e){ r = { ok:false, error:(e&&e.message)||'failed' }; }
   if(btn){ btn.disabled=false; btn.textContent='Save & verify'; }
-  if(ok){ showToast('✅','CurseForge key verified — browsing mods'); asaBrowse(); }
-  else {
-    // Roll back an invalid key so we don't leave a broken one saved.
+  if(r && r.ok){ setNote(''); showToast('✅','CurseForge key verified — browsing mods'); asaBrowse(); return; }
+  // Failure — always show a clear reason, and roll back only a genuinely bad key.
+  const err=(r&&r.error)||'failed';
+  if(err==='bad-key'){
     appSettings.curseforgeApiKey = prev || '';
     try { await window.nexus.saveSettings(appSettings); } catch(e){}
-    if(note && !note.innerHTML.trim()) note.innerHTML='<span style="color:var(--red)">That key didn\'t work — double-check it and try again.</span>';
+    setNote('<span style="color:var(--red)">That key didn\'t work — double-check it and paste again.</span>');
+  } else if(err==='timeout'){
+    setNote('<span style="color:var(--red)">Couldn\'t reach CurseForge (timed out). Check your internet/firewall and try again.</span>');
+  } else if(err==='no-key'){
+    setNote('<span style="color:var(--red)">Key didn\'t save — try again.</span>');
+  } else {
+    setNote('<span style="color:var(--red)">Verify failed: '+escapeHtml(String(err))+'</span>');
   }
 }
 
