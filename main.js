@@ -23,10 +23,11 @@ fs.mkdirSync(STEAMCMD_DIR, { recursive: true });
 // ── Java management ───────────────────────────────────────────────────────────
 // Java version requirements per Minecraft version range
 function getRequiredJavaVersion(mcVersion) {
-  // Always use Java 21 for Minecraft — it's the current LTS and
-  // required for all versions 1.17+. Older versions also run fine on 21.
-  // Never download Java 8 or 17 as modern MC won't start on them.
-  return 21;
+  // Use Java 25 — the current LTS and what the latest Minecraft requires (its
+  // bundler is now compiled for Java 25 / class file 69). Java 25 also runs the
+  // older modern versions Omnex supports, so it's a safe single default.
+  // Never download Java 8/17 as modern MC won't start on them.
+  return 25;
 }
 
 async function getJavaDownloadUrl(javaVersion, serverId) {
@@ -46,12 +47,13 @@ async function getJavaDownloadUrl(javaVersion, serverId) {
 
   // Fallback: known stable direct GitHub release URLs
   const fallbacks = {
+    25: 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jre_x64_windows_hotspot_25.0.4.1_1.zip',
     21: 'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.5%2B11/OpenJDK21U-jre_x64_windows_hotspot_21.0.5_11.zip',
     17: 'https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jre_x64_windows_hotspot_17.0.13_11.zip',
     11: 'https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.25%2B9/OpenJDK11U-jre_x64_windows_hotspot_11.0.25_9.zip',
     8:  'https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u432-b06/OpenJDK8U-jre_x64_windows_hotspot_8u432b06.zip',
   };
-  return fallbacks[javaVersion] || fallbacks[21];
+  return fallbacks[javaVersion] || fallbacks[25];
 }
 
 // Check if system Java meets the required version
@@ -81,12 +83,13 @@ async function ensureJava(serverId, mcVersion) {
   const requiredVersion = getRequiredJavaVersion(mcVersion);
   const server = appData.servers.find(s => s.id === serverId);
 
-  // 1. Check server-local Java — verify path contains jdk-21 or run version check
+  // 1. Check server-local Java — reject a cached JRE older than what's required
+  // (e.g. a previously-bundled Java 21 when the latest Minecraft now needs 25).
   if (server?.javaExe && fs.existsSync(server.javaExe)) {
-    // Quick check: if path contains a version number less than 21, reject it
-    const pathHasOldVer = /jdk-(8|9|10|11|12|13|14|15|16|17|18|19|20)[.\-+]/.test(server.javaExe);
+    const staleRe = new RegExp('jdk-(' + Array.from({ length: requiredVersion - 8 }, (_, i) => i + 8).join('|') + ')[.\\-+]');
+    const pathHasOldVer = staleRe.test(server.javaExe);
     if (pathHasOldVer) {
-      log(serverId, 'warn', `Cached Java path indicates wrong version (${server.javaExe}), clearing...`);
+      log(serverId, 'warn', `Cached Java is older than required (Java ${requiredVersion}); re-provisioning...`);
       server.javaExe = null;
       const oldJavaDir = path.join(server.installDir, '_java');
       if (fs.existsSync(oldJavaDir)) {
@@ -94,7 +97,7 @@ async function ensureJava(serverId, mcVersion) {
       }
       saveData();
     } else {
-      log(serverId, 'dim', `Using bundled Java 21 for this server.`);
+      log(serverId, 'dim', `Using bundled Java ${requiredVersion} for this server.`);
       return server.javaExe;
     }
   }
@@ -698,6 +701,20 @@ ipcMain.handle('get-servers',   () => appData.servers.map(s => {
   const online = !!serverProcesses[s.id];
   return { ...s, status: online ? 'online' : 'offline', startedAt: online ? (s.startedAt || null) : null };
 }));
+// ── Server organization (groups + manual order) ────────────────────────────────
+ipcMain.handle('get-server-groups', () => appData.serverGroups || []);
+// One call applies the whole layout the renderer computed: group list (order +
+// names + collapsed) and each server's groupId + order.
+ipcMain.handle('save-server-layout', (e, { groups, order }) => {
+  if (Array.isArray(groups)) appData.serverGroups = groups.map(g => ({ id: String(g.id), name: String(g.name || 'Group').slice(0, 40), collapsed: !!g.collapsed }));
+  if (Array.isArray(order)) {
+    const byId = new Map(order.map(o => [o.id, o]));
+    for (const s of appData.servers) { const o = byId.get(s.id); if (o) { s.groupId = o.groupId || ''; s.order = Number(o.order) || 0; } }
+  }
+  saveData();
+  return { ok: true };
+});
+
 // Replay a server's buffered console output (used when switching servers).
 ipcMain.handle('get-console', (e, id) => consoleHistory[id] || []);
 // Replay a server's activity feed (joins/leaves/deaths/advancements/chat).

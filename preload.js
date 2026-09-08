@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('nexus', {
   getStats:          ()    => ipcRenderer.invoke('get-stats'),
   getServerBundle:   (id)  => ipcRenderer.invoke('get-server-bundle', id),
   setServerField:    (id, key, value) => ipcRenderer.invoke('set-server-field', {id, key, value}),
+  getServerGroups:   ()               => ipcRenderer.invoke('get-server-groups'),
+  saveServerLayout:  (layout)         => ipcRenderer.invoke('save-server-layout', layout),
   renameServer:      (id, newName)    => ipcRenderer.invoke('rename-server', {id, newName}),
   addFirewallRule:   (id, ports)      => ipcRenderer.invoke('add-firewall-rule', {id, ports}),
   readAppFile:       (filename)       => ipcRenderer.invoke('read-app-file', filename),
