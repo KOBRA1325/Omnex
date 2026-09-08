@@ -185,6 +185,9 @@ const GAMES = [
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let servers   = [], schedules = [], activeId = null, uptimeSec = 0;
+let serverGroups = [];        // [{id,name,collapsed}] — user-defined sidebar groups
+let serverSearch = '';        // sidebar filter text
+let _dragServerId = null;     // server being dragged
 let statsInterval = null, uptimeInterval = null, appSettings = {}, currentView = 'dashboard';
 let __manualUpdateCheck = false, appVersionStr = '';
 let selectedGame = GAMES[0], selectedMcType = 'vanilla', selectedTerrariaType = 'vanilla', addModalMode = 'install';
@@ -882,29 +885,127 @@ function closeTextModal() {
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
+function sidebarItemHtml(s) {
+  const isOnline = s.status === 'online', isCrashed = s.status === 'crashed';
+  const statusClass = isOnline ? 'online' : isCrashed ? 'crashed' : '';
+  const g = GAMES.find(g => g.name === s.game);
+  const iconHtml = s.iconImage
+    ? `<img src="${fileUrl(s.iconImage)}" alt="" onerror="this.style.display='none'">`
+    : s.customIcon
+    ? `<span>${escapeHtml(s.customIcon)}</span>`
+    : (g ? (g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><span class="server-fallback" style="display:none">${g.fallback}</span>` : `<span>${g.fallback||s.game[0]}</span>`) : `<span>${s.game[0]}</span>`);
+  const colorStyle = s.color ? ` style="box-shadow: inset 3px 0 0 ${escapeHtml(s.color)}"` : '';
+  return `<div class="server-item ${s.id===activeId?'active':''}" draggable="true" data-id="${s.id}"${colorStyle}
+      onclick="selectServer('${s.id}')" oncontextmenu="showServerContextMenu(event, '${s.id}')"
+      ondragstart="sbDragStart(event,'${s.id}')" ondragend="sbDragEnd(event)" ondragover="sbDragOver(event)" ondragleave="sbDragLeave(event)" ondrop="sbDrop(event,'${s.id}')">
+    <div class="server-item-icon">${iconHtml}</div>
+    <div class="server-item-info">
+      <div class="server-item-name">${escapeHtml(s.name)}</div>
+      <div class="server-item-meta">${s.game} · ${s.port}</div>
+    </div>
+    <div class="server-status-dot ${statusClass}"></div>
+  </div>`;
+}
+
 function renderSidebar() {
   const list = document.getElementById('serverList'); if (!list) return;
-  list.innerHTML = servers.map(s => {
-    const isOnline = s.status === 'online', isCrashed = s.status === 'crashed';
-    const statusClass = isOnline ? 'online' : isCrashed ? 'crashed' : '';
-    const g = GAMES.find(g => g.name === s.game);
-    const iconHtml = s.iconImage
-      ? `<img src="${fileUrl(s.iconImage)}" alt="" onerror="this.style.display='none'">`
-      : s.customIcon
-      ? `<span>${escapeHtml(s.customIcon)}</span>`
-      : (g ? (g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><span class="server-fallback" style="display:none">${g.fallback}</span>` : `<span>${g.fallback||s.game[0]}</span>`) : `<span>${s.game[0]}</span>`);
-    const colorStyle = s.color ? ` style="box-shadow: inset 3px 0 0 ${escapeHtml(s.color)}"` : '';
-    return `<div class="server-item ${s.id===activeId?'active':''}"${colorStyle} onclick="selectServer('${s.id}')" oncontextmenu="showServerContextMenu(event, '${s.id}')">
-      <div class="server-item-icon">
-        ${iconHtml}
-      </div>
-      <div class="server-item-info">
-        <div class="server-item-name">${escapeHtml(s.name)}</div>
-        <div class="server-item-meta">${s.game} · ${s.port}</div>
-      </div>
-      <div class="server-status-dot ${statusClass}"></div>
+  const tools = document.getElementById('serverTools'); if (tools) tools.style.display = servers.length ? 'flex' : 'none';
+  if (!servers.length) { list.innerHTML = '<div class="empty-msg">No servers yet.<br/>Click + Add Server below.</div>'; return; }
+  const q = (serverSearch || '').toLowerCase();
+  const match = s => !q || (s.name||'').toLowerCase().includes(q) || (s.game||'').toLowerCase().includes(q);
+  const inGroup = gid => servers.filter(s => (s.groupId||'') === gid && match(s)).sort((a,b) => (a.order||0) - (b.order||0));
+  const hasGroups = serverGroups.length > 0;
+  let html = '';
+  for (const g of serverGroups) {
+    const gs = inGroup(g.id);
+    if (q && !gs.length) continue;              // hide empty groups while searching
+    const collapsed = g.collapsed && !q;
+    html += `<div class="server-group-hdr" ondragover="sbDragOver(event)" ondragleave="sbDragLeave(event)" ondrop="sbDropGroup(event,'${g.id}')">
+      <span class="sg-caret ${collapsed?'':'open'}" onclick="toggleServerGroup('${g.id}')">▸</span>
+      <span class="sg-name" onclick="toggleServerGroup('${g.id}')" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</span>
+      <span class="sg-count">${gs.length}</span>
+      <span class="sg-actions">
+        <button title="Rename" onclick="event.stopPropagation();renameServerGroup('${g.id}')">✎</button>
+        <button title="Delete group" onclick="event.stopPropagation();deleteServerGroup('${g.id}')">🗑</button>
+      </span>
     </div>`;
-  }).join('') || '<div class="empty-msg-sm">No servers yet.</div>';
+    if (!collapsed) {
+      html += `<div class="server-group-body" ondragover="sbDragOver(event)" ondragleave="sbDragLeave(event)" ondrop="sbDropGroup(event,'${g.id}')">`;
+      html += gs.map(sidebarItemHtml).join('') || `<div class="sg-empty">Drop a server here</div>`;
+      html += `</div>`;
+    }
+  }
+  const ung = inGroup('');
+  if (ung.length || (!q && hasGroups)) {
+    if (hasGroups) html += `<div class="server-group-hdr ungrouped" ondragover="sbDragOver(event)" ondragleave="sbDragLeave(event)" ondrop="sbDropGroup(event,'')"><span class="sg-name" style="opacity:.65">Ungrouped</span><span class="sg-count">${ung.length}</span></div>`;
+    html += `<div class="server-group-body" ondragover="sbDragOver(event)" ondragleave="sbDragLeave(event)" ondrop="sbDropGroup(event,'')">`;
+    html += ung.map(sidebarItemHtml).join('') || (hasGroups ? `<div class="sg-empty">Drop here</div>` : '');
+    html += `</div>`;
+  }
+  list.innerHTML = html || '<div class="empty-msg-sm" style="padding:10px">No servers match.</div>';
+}
+
+// ── Sidebar organization: search, groups, drag-and-drop reorder ─────────────────
+function onServerSearch() { serverSearch = document.getElementById('serverSearch')?.value || ''; renderSidebar(); }
+
+function persistServerLayout() {
+  const order = servers.map(s => ({ id: s.id, groupId: s.groupId || '', order: s.order || 0 }));
+  try { window.nexus.saveServerLayout({ groups: serverGroups, order }); } catch (e) {}
+}
+function createServerGroup() {
+  const name = prompt('New group name:'); if (name == null) return;
+  const nm = name.trim(); if (!nm) return;
+  serverGroups.push({ id: 'g' + Date.now().toString(36), name: nm, collapsed: false });
+  persistServerLayout(); renderSidebar();
+}
+function renameServerGroup(gid) {
+  const g = serverGroups.find(x => x.id === gid); if (!g) return;
+  const name = prompt('Rename group:', g.name); if (name == null) return;
+  const nm = name.trim(); if (!nm) return;
+  g.name = nm; persistServerLayout(); renderSidebar();
+}
+function deleteServerGroup(gid) {
+  const g = serverGroups.find(x => x.id === gid); if (!g) return;
+  if (!confirm(`Delete group "${g.name}"? Its servers move to Ungrouped (servers aren't deleted).`)) return;
+  servers.forEach(s => { if ((s.groupId||'') === gid) s.groupId = ''; });
+  serverGroups = serverGroups.filter(x => x.id !== gid);
+  persistServerLayout(); renderSidebar();
+}
+function toggleServerGroup(gid) {
+  const g = serverGroups.find(x => x.id === gid); if (!g) return;
+  g.collapsed = !g.collapsed; persistServerLayout(); renderSidebar();
+}
+function sbClearIndicators() { document.querySelectorAll('.server-item.drag-over, .server-group-hdr.drag-over, .server-group-body.drag-over').forEach(el => el.classList.remove('drag-over')); }
+function sbDragStart(e, id) { _dragServerId = id; try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); } catch (x) {} e.currentTarget.classList.add('dragging'); }
+function sbDragEnd(e) { _dragServerId = null; e.currentTarget.classList.remove('dragging'); sbClearIndicators(); }
+function sbDragOver(e) { if (!_dragServerId) return; e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (x) {} e.currentTarget.classList.add('drag-over'); }
+function sbDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function sbMove(dragId, targetGroupId, beforeId) {
+  const drag = servers.find(s => s.id === dragId); if (!drag) return;
+  drag.groupId = targetGroupId || '';
+  const groupList = servers.filter(s => (s.groupId||'') === (targetGroupId||'') && s.id !== dragId).sort((a,b) => (a.order||0) - (b.order||0));
+  let idx = beforeId ? groupList.findIndex(s => s.id === beforeId) : groupList.length;
+  if (idx < 0) idx = groupList.length;
+  groupList.splice(idx, 0, drag);
+  groupList.forEach((s, i) => s.order = i);
+  persistServerLayout(); renderSidebar();
+  if (currentView === 'dashboard') renderDashboard();
+}
+function sbDrop(e, targetId) {
+  e.preventDefault(); e.stopPropagation(); sbClearIndicators();
+  if (!_dragServerId || _dragServerId === targetId) return;
+  const target = servers.find(s => s.id === targetId); if (!target) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const after = (e.clientY - rect.top) > rect.height / 2;
+  const groupList = servers.filter(s => (s.groupId||'') === (target.groupId||'') && s.id !== _dragServerId).sort((a,b) => (a.order||0) - (b.order||0));
+  const ti = groupList.findIndex(s => s.id === targetId);
+  const beforeId = after ? (groupList[ti+1] ? groupList[ti+1].id : null) : targetId;
+  sbMove(_dragServerId, target.groupId || '', beforeId);
+}
+function sbDropGroup(e, groupId) {
+  e.preventDefault(); e.stopPropagation(); sbClearIndicators();
+  if (!_dragServerId) return;
+  sbMove(_dragServerId, groupId || '', null);
 }
 
 // ── Server selection ──────────────────────────────────────────────────────────
@@ -3702,6 +3803,7 @@ async function init(){
   try{appVersionStr=await window.nexus.getAppVersion();}catch(e){}
   servers=await window.nexus.getServers();
   schedules=await window.nexus.getSchedules();
+  try{ serverGroups=await window.nexus.getServerGroups()||[]; }catch(e){ serverGroups=[]; }
   servers=servers.map(s=>({...s,status:['installing','updating','starting'].includes(s.status)?'offline':s.status}));
   wireEvents();
   startClock();

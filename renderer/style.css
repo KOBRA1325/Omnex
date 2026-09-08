@@ -157,6 +157,39 @@ input, textarea, select, .console-input, .console-output, .config-input {
 .server-list::-webkit-scrollbar { width: 3px; }
 .server-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+/* Server organization: search + group tools */
+.server-tools { display: flex; gap: 6px; align-items: center; padding: 4px 8px 6px; }
+.server-search {
+  flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-family: inherit; font-size: 11px; padding: 6px 8px; outline: none; pointer-events: all;
+}
+.server-search:focus { border-color: rgba(var(--accent-rgb),0.5); }
+.server-group-add {
+  flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text-dim); font-family: inherit; font-size: 11px; font-weight: 600; padding: 6px 8px; cursor: pointer; pointer-events: all; white-space: nowrap;
+}
+.server-group-add:hover { color: var(--accent); border-color: rgba(var(--accent-rgb),0.5); }
+/* Group headers */
+.server-group-hdr {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px 4px; margin-top: 4px;
+  font-family: 'Share Tech Mono', monospace; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+  border-radius: 6px; user-select: none;
+}
+.server-group-hdr .sg-caret { cursor: pointer; font-size: 9px; transition: transform 0.15s; display: inline-block; }
+.server-group-hdr .sg-caret.open { transform: rotate(90deg); }
+.server-group-hdr .sg-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-group-hdr .sg-count { background: var(--surface); border-radius: 8px; padding: 1px 7px; font-size: 9px; }
+.server-group-hdr .sg-actions { display: none; gap: 2px; }
+.server-group-hdr:hover .sg-actions { display: flex; }
+.server-group-hdr .sg-actions button { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 3px; pointer-events: all; }
+.server-group-hdr .sg-actions button:hover { color: var(--accent); }
+.server-group-body { min-height: 2px; border-radius: 6px; }
+.sg-empty { font-size: 10px; color: var(--text-dim); text-align: center; padding: 8px; border: 1px dashed var(--border); border-radius: 6px; margin: 2px 0; }
+/* Drag-and-drop states */
+.server-item.dragging { opacity: 0.4; }
+.server-item.drag-over { box-shadow: inset 0 2px 0 var(--accent) !important; }
+.server-group-hdr.drag-over, .server-group-body.drag-over { background: rgba(var(--accent-rgb),0.08); outline: 1px dashed rgba(var(--accent-rgb),0.5); }
+
 .empty-msg {
   font-size: 11px;
   color: var(--text-dim);
