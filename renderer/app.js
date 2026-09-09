@@ -489,6 +489,38 @@ async function setAsaMap(name) {
   showToast('🗺️', 'Map set to ' + name.replace('_WP', '') + ' — restart the server to apply it in-game');
 }
 
+// ── ARK: Survival Ascended cluster wizard ───────────────────────────────────────
+const ARK_CLUSTER_MAPS = [
+  ['TheIsland_WP','The Island'], ['ScorchedEarth_WP','Scorched Earth'], ['TheCenter_WP','The Center'],
+  ['Aberration_WP','Aberration'], ['Extinction_WP','Extinction'], ['Ragnarok_WP','Ragnarok'], ['Astraeos_WP','Astraeos'],
+];
+function openClusterWizard() {
+  const grid = document.getElementById('clusterMaps');
+  if (grid) grid.innerHTML = ARK_CLUSTER_MAPS.map(([wp, disp], i) =>
+    `<label class="cluster-map"><input type="checkbox" value="${wp}" ${i < 2 ? 'checked' : ''}> ${disp}</label>`).join('');
+  const n = document.getElementById('clusterName'); if (n) n.value = '';
+  const p = document.getElementById('clusterBasePort'); if (p) p.value = '7777';
+  showModal('clusterModal');
+}
+function closeClusterWizard() { hideModal('clusterModal'); }
+async function createCluster() {
+  const name = (document.getElementById('clusterName')?.value || '').trim();
+  const basePort = parseInt(document.getElementById('clusterBasePort')?.value, 10) || 7777;
+  const maps = [...document.querySelectorAll('#clusterMaps input:checked')].map(c => c.value);
+  if (!name) { showToast('ℹ️', 'Enter a cluster name.'); return; }
+  if (maps.length < 2) { showToast('ℹ️', 'Pick at least 2 maps for a cluster.'); return; }
+  const btn = document.getElementById('clusterCreateBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const r = await window.nexus.createArkCluster({ name, maps, basePort });
+    if (r && r.ok) {
+      showToast('🦖', `Cluster "${name}" — installing ${r.count} maps in the background…`);
+      closeClusterWizard();
+      try { servers = await window.nexus.getServers(); serverGroups = await window.nexus.getServerGroups() || []; renderSidebar(); if (currentView === 'dashboard') renderDashboard(); } catch (e) {}
+    } else showToast('❌', (r && r.error) || 'Could not create cluster');
+  } catch (e) { showToast('❌', e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Create cluster'; }
+}
+
 // ── Terraria world map (rendered from the .wld, pan/zoom image) ─────────────────
 let tmap = { scale: 1, tx: 0, ty: 0, natW: 0, natH: 0 };
 let _tmapAutoTimer = null;

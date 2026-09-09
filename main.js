@@ -296,10 +296,17 @@ const GAME_DEFS = {
   'Ark: Survival Ascended': { type:'steam', serverAppId:'2430930', startExe:'ArkAscendedServer.exe', startArgs:(d,s)=>{
     const pw = s.rconPassword || 'omnex';
     const map = s.arkMap || 'TheIsland_WP';
+    const q = s.queryPort ? `?QueryPort=${s.queryPort}` : '';
     const args = [
-      `${map}?listen?Port=${s.port||7777}?RCONEnabled=True?RCONPort=${s.rconPort||27020}?ServerAdminPassword=${pw}`,
+      `${map}?listen?Port=${s.port||7777}${q}?RCONEnabled=True?RCONPort=${s.rconPort||27020}?ServerAdminPassword=${pw}`,
       '-server', '-log', `-WinLiveMaxPlayers=${s.maxPlayers||70}`,
     ];
+    // Cluster: shared id + shared transfer folder + allow transfers between any maps.
+    if (s.clusterId) {
+      args.push(`-clusterid=${s.clusterId}`);
+      if (s.clusterDir) args.push(`-ClusterDirOverride=${s.clusterDir}`);
+      args.push('-NoTransferFromFiltering');
+    }
     // CurseForge mods: the server auto-downloads each ID in -mods (order = load order).
     const mods = (s.arkMods || []).filter(m => m && m.id && m.enabled !== false).map(m => m.id).join(',');
     if (mods) args.push(`-mods=${mods}`);
@@ -857,6 +864,10 @@ async function createAndInstallServer(config) {
 
   const server = { id, name:config.name, game:config.game, icon:config.icon, fallback:config.fallback, port:config.port, installDir, status:'installing', mcType:config.mcType, mcVersion:config.mcVersion, terrariaType:config.terrariaType, steamPass:config.steamPass };
   if (config.password) server.password = config.password; // best-effort; applied by config sync where supported
+  // ARK: Survival Ascended cluster/map fields (set by the cluster wizard).
+  for (const k of ['arkMap','clusterId','clusterDir','rconPort','queryPort','groupId','order','arkClusterTransfers']) {
+    if (config[k] !== undefined) server[k] = config[k];
+  }
   // Palworld: default to showing in community server list (users can toggle off in config)
   if (config.game === 'Palworld') server.showInPublicList = true;
   appData.servers.push(server);
@@ -878,6 +889,40 @@ async function createAndInstallServer(config) {
   }
 }
 ipcMain.handle('install-server', async (e, config) => createAndInstallServer(config));
+
+// ── ARK: Survival Ascended cluster wizard ───────────────────────────────────────
+// Creates one ASA server per selected map, all sharing a cluster id + a shared
+// transfer folder + NoTransferFromFiltering, on auto-assigned unique ports, grouped
+// together in the sidebar, with cross-map transfers enabled. Installs run in the
+// background (one at a time — SteamCMD doesn't like parallel).
+const ARK_MAP_DISPLAY = {
+  'TheIsland_WP':'The Island', 'ScorchedEarth_WP':'Scorched Earth', 'TheCenter_WP':'The Center',
+  'Aberration_WP':'Aberration', 'Extinction_WP':'Extinction', 'Ragnarok_WP':'Ragnarok', 'Astraeos_WP':'Astraeos',
+};
+ipcMain.handle('create-ark-cluster', async (e, { name, maps, basePort } = {}) => {
+  const clusterName = String(name || '').trim();
+  if (!clusterName) return { ok: false, error: 'Enter a cluster name.' };
+  const mapList = (Array.isArray(maps) ? maps : []).filter(Boolean);
+  if (mapList.length < 2) return { ok: false, error: 'Pick at least 2 maps for a cluster.' };
+  const clusterId = (clusterName.replace(/[^A-Za-z0-9]/g, '') || ('cluster' + Date.now())).slice(0, 32);
+  const clusterDir = path.join(USER_DATA, 'clusters', clusterId);
+  try { fs.mkdirSync(clusterDir, { recursive: true }); } catch (err) {}
+  // Group them in the sidebar.
+  const groupId = 'g' + Date.now().toString(36);
+  appData.serverGroups = appData.serverGroups || [];
+  appData.serverGroups.push({ id: groupId, name: clusterName, collapsed: false });
+  saveData();
+  const gport = parseInt(basePort, 10) || 7777;
+  const configs = mapList.map((wp, i) => ({
+    name: `${clusterName} - ${ARK_MAP_DISPLAY[wp] || String(wp).replace('_WP','')}`,
+    game: 'Ark: Survival Ascended', fallback: '🦖',
+    port: gport + i * 2, queryPort: 27015 + i, rconPort: 27020 + i,
+    arkMap: wp, clusterId, clusterDir, groupId, order: i, arkClusterTransfers: true,
+  }));
+  // Fire off installs sequentially in the background; return immediately.
+  (async () => { for (const cfg of configs) { try { await createAndInstallServer(cfg); } catch (err) {} } })();
+  return { ok: true, count: configs.length, clusterId, clusterDir };
+});
 
 // ── UPDATE SERVER ─────────────────────────────────────────────────────────────
 ipcMain.handle('update-server', async (e, id) => {
@@ -6273,6 +6318,15 @@ function configureArkRcon(server) {
       else ini = `[ServerSettings]\n${key}=${val}\n` + ini;
     };
     ensure('RCONEnabled', 'True'); ensure('RCONPort', String(server.rconPort)); ensure('ServerAdminPassword', admin);
+    // Cluster members: allow full character/dino/item transfers between maps.
+    if (server.arkClusterTransfers) {
+      ensure('PreventDownloadSurvivors', 'False');
+      ensure('PreventDownloadItems', 'False');
+      ensure('PreventDownloadDinos', 'False');
+      ensure('PreventUploadSurvivors', 'False');
+      ensure('PreventUploadItems', 'False');
+      ensure('PreventUploadDinos', 'False');
+    }
     try { fs.writeFileSync(iniPath, ini); } catch (e) {}
   }
 }

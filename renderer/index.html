@@ -108,6 +108,7 @@
       <div class="empty-msg">No servers yet.<br/>Click + Add Server below.</div>
     </div>
     <button class="add-server-btn" onclick="openAddModal()">+ Add Server</button>
+    <button class="add-server-btn" style="margin-top:6px; font-size:12px" onclick="openClusterWizard()">🦖 Create ARK Cluster</button>
   </div>
 
   <!-- DASHBOARD VIEW -->
@@ -738,6 +739,32 @@
         <div class="empty-msg-sm">Loading…</div>
       </div>
       <div class="empty-msg-sm" style="padding:8px 2px 0; line-height:1.5"><b>Restart the server</b> for mod changes to take effect.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ARK CLUSTER WIZARD MODAL -->
+<div class="modal-overlay" id="clusterModal">
+  <div class="modal" style="width:min(560px, 95vw)">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>🦖 &nbsp;Create ARK Cluster</span>
+      <button class="btn-modal-cancel" onclick="closeClusterWizard()">✕ Close</button>
+    </div>
+    <div class="empty-msg-sm" style="text-align:left; padding:2px 0 12px; line-height:1.6">
+      Creates one <b>Ark: Survival Ascended</b> server per map, all sharing a cluster so players transfer characters, dinos &amp; items between them. Omnex assigns unique ports, a shared cluster folder, and groups them together.
+    </div>
+    <div class="config-row"><div class="config-label">Cluster name</div>
+      <input class="config-input" id="clusterName" placeholder="e.g. My Cluster" style="pointer-events:all"></div>
+    <div class="config-row"><div class="config-label">Base game port<div class="config-desc" style="font-size:10px;color:var(--text-dim)">Each map gets its own port from here up</div></div>
+      <input class="config-input" id="clusterBasePort" type="number" value="7777" style="pointer-events:all; width:120px"></div>
+    <div class="config-group-label" style="margin-top:10px">🗺 Maps in the cluster <span style="color:var(--text-dim);font-weight:400">(pick 2+)</span></div>
+    <div id="clusterMaps" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:4px"></div>
+    <div id="clusterWarn" class="empty-msg-sm" style="text-align:left; padding:8px 0 0; line-height:1.5; color:var(--yellow)">
+      ⚠ Each map is a full ARK server install (large download + disk). A 3-map cluster downloads ARK three times.
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px">
+      <button class="btn-modal-cancel" onclick="closeClusterWizard()">Cancel</button>
+      <button class="btn-modal-save" id="clusterCreateBtn" onclick="createCluster()">Create cluster</button>
     </div>
   </div>
 </div>
