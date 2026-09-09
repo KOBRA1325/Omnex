@@ -2932,6 +2932,7 @@ async function tmlDeleteMod(name){
 // ── Ark: Survival Ascended mods (CurseForge) ────────────────────────────────────
 let asaInstalledIds = new Set(); // CurseForge IDs installed on the active server (for Browse badges)
 let _asaHasKey = false;
+let _asaQuery = '', _asaIndex = 0, _asaHasMore = false, _asaLoading = false, _asaScrollBound = false;
 
 function openAsaMods(){
   const s=getActive(); if(!s) return;
@@ -2952,7 +2953,7 @@ function asaSwitchTab(tab){
   if(i) i.style.display = browse?'none':'';
   if(tb) tb.classList.toggle('active', browse);
   if(ti) ti.classList.toggle('active', !browse);
-  if(!browse) renderAsaMods();
+  if(browse) closeAsaModDetail(); else renderAsaMods();
 }
 
 let _asaSearchTimer=null;
@@ -2961,10 +2962,13 @@ function onAsaSearchInput(){ clearTimeout(_asaSearchTimer); _asaSearchTimer=setT
 async function asaBrowse(){
   const s=getActive(); if(!s) return;
   const grid=document.getElementById('asaBrowseResults'); if(!grid) return;
-  const query=document.getElementById('asaSearchQuery')?.value.trim()||'';
+  closeAsaModDetail();
+  _asaQuery=document.getElementById('asaSearchQuery')?.value.trim()||'';
+  _asaIndex=0; _asaHasMore=false; _asaLoading=false;
   grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Searching CurseForge…</div>';
+  bindAsaScroll();
   try {
-    const r=await window.nexus.curseforgeSearch({ query });
+    const r=await window.nexus.curseforgeSearch({ query:_asaQuery, index:0 });
     const setup=document.getElementById('asaKeySetup'), toolbar=document.getElementById('asaBrowseToolbar');
     if(r && (r.error==='no-key' || r.error==='bad-key')){
       if(setup) setup.style.display='';
@@ -2978,14 +2982,34 @@ async function asaBrowse(){
     if(toolbar) toolbar.style.display='';
     if(!r || !r.ok){ grid.innerHTML=`<div class="empty-msg-sm" style="padding:20px">Search failed.${r&&r.error?'<br><span style="opacity:.7">'+escapeHtml(r.error)+'</span>':''}</div>`; return; }
     if(!r.mods.length){ grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">No mods found. Try another search.</div>'; return; }
+    _asaHasMore=!!r.hasMore; _asaIndex=r.mods.length;
     grid.innerHTML=r.mods.map(asaModCardHtml).join('');
   } catch(e){ grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Search failed.</div>'; }
+}
+async function asaLoadMore(){
+  if(_asaLoading || !_asaHasMore) return;
+  const grid=document.getElementById('asaBrowseResults'); if(!grid) return;
+  _asaLoading=true;
+  try {
+    const r=await window.nexus.curseforgeSearch({ query:_asaQuery, index:_asaIndex });
+    if(r && r.ok && r.mods && r.mods.length){
+      _asaIndex += r.mods.length; _asaHasMore=!!r.hasMore;
+      grid.insertAdjacentHTML('beforeend', r.mods.map(asaModCardHtml).join(''));
+    } else { _asaHasMore=false; }
+  } catch(e){ _asaHasMore=false; }
+  _asaLoading=false;
+}
+function bindAsaScroll(){
+  if(_asaScrollBound) return;
+  const grid=document.getElementById('asaBrowseResults'); if(!grid) return;
+  grid.addEventListener('scroll', ()=>{ if(grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 140) asaLoadMore(); });
+  _asaScrollBound=true;
 }
 function asaModCardHtml(m){
   const installed = asaInstalledIds.has(String(m.id));
   const d=m.downloads||0; const dls = d>=1e6 ? (d/1e6).toFixed(1)+'M' : d>=1000 ? (d/1000).toFixed(d>=1e5?0:1)+'k' : String(d);
   const jt=escapeHtml(m.name||'').replace(/'/g,"\\'");
-  return `<div class="mod-card">
+  return `<div class="mod-card" onclick="openAsaModDetail('${m.id}')" title="Click for details">
     <div class="mod-card-top">
       <div class="mod-card-icon">${m.logo?`<img src="${escapeHtml(m.logo)}" alt="" onerror="this.parentNode.textContent='🦖'">`:'🦖'}</div>
       <div class="mod-card-head">
@@ -2997,9 +3021,61 @@ function asaModCardHtml(m){
     <div class="mod-card-cats"></div>
     <div class="mod-card-foot">
       <span class="mod-card-dls">⬇ ${dls}</span>
-      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="asaInstallFromBrowse('${m.id}','${jt}', this)">${installed?'✓ Added':'Add'}</button>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="event.stopPropagation();asaInstallFromBrowse('${m.id}','${jt}', this)">${installed?'✓ Added':'Add'}</button>
     </div>
   </div>`;
+}
+
+// Strip active content from CurseForge-supplied HTML before injecting it.
+function sanitizeCfHtml(html){
+  return String(html||'')
+    .replace(/<script[\s\S]*?<\/script>/gi,'')
+    .replace(/<style[\s\S]*?<\/style>/gi,'')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi,'')
+    .replace(/ on\w+="[^"]*"/gi,'')
+    .replace(/ on\w+='[^']*'/gi,'')
+    .replace(/javascript:/gi,'');
+}
+async function openAsaModDetail(id){
+  const grid=document.getElementById('asaBrowseResults'), toolbar=document.getElementById('asaBrowseToolbar'), detail=document.getElementById('asaModDetail');
+  if(!detail) return;
+  if(grid) grid.style.display='none';
+  if(toolbar) toolbar.style.display='none';
+  detail.style.display='block';
+  detail.innerHTML='<div class="empty-msg-sm" style="padding:24px">Loading details…</div>';
+  let r;
+  try { r=await window.nexus.curseforgeMod(id); } catch(e){ r={ok:false,error:e.message}; }
+  if(!r || !r.ok){ detail.innerHTML=`<button class="mod-back-btn" onclick="closeAsaModDetail()">← Back</button><div class="empty-msg-sm" style="padding:24px">Couldn't load details.${r&&r.error?'<br><span style="opacity:.7">'+escapeHtml(r.error)+'</span>':''}</div>`; return; }
+  const m=r.mod||{};
+  const installed=asaInstalledIds.has(String(m.id));
+  const d=m.downloads||0; const dls = d>=1e6 ? (d/1e6).toFixed(1)+'M' : d>=1000 ? (d/1000).toFixed(d>=1e5?0:1)+'k' : String(d);
+  const jt=escapeHtml(m.name||'').replace(/'/g,"\\'");
+  const cats=(m.categories||[]).slice(0,8).map(c=>`<span class="mod-card-cat">${escapeHtml(c)}</span>`).join('');
+  const shots=(m.screenshots||[]).slice(0,6).map(u=>`<img class="mod-shot" src="${escapeHtml(u)}" alt="" loading="lazy" onerror="this.style.display='none'">`).join('');
+  detail.innerHTML = `
+    <div class="mod-detail-bar">
+      <button class="mod-back-btn" onclick="closeAsaModDetail()">← Back</button>
+      ${m.url?`<button class="mod-link" onclick="window.nexus.openExternal('${String(m.url).replace(/'/g,'%27')}')">↗ CurseForge</button>`:''}
+    </div>
+    <div class="mod-detail-head">
+      <div class="mod-detail-icon">${m.logo?`<img src="${escapeHtml(m.logo)}" alt="" onerror="this.parentNode.textContent='🦖'">`:'🦖'}</div>
+      <div class="mod-detail-meta">
+        <div class="mod-detail-title">${escapeHtml(m.name||'')}</div>
+        <div class="mod-card-author">by ${escapeHtml((m.authors&&m.authors.join(', '))||m.author||'?')}</div>
+        <div class="mod-detail-stats">⬇ ${dls} downloads</div>
+        <div class="mod-card-cats" style="margin-top:6px">${cats}</div>
+      </div>
+      <button class="mod-install-btn ${installed?'installed':''}" ${installed?'disabled':''} onclick="asaInstallFromBrowse('${m.id}','${jt}', this)">${installed?'✓ Added':'Add'}</button>
+    </div>
+    ${shots?`<div class="mod-shots">${shots}</div>`:''}
+    <div class="mod-detail-desc">${sanitizeCfHtml(m.description) || '<span style="opacity:.6">No description provided.</span>'}</div>`;
+  detail.scrollTop=0;
+}
+function closeAsaModDetail(){
+  const grid=document.getElementById('asaBrowseResults'), toolbar=document.getElementById('asaBrowseToolbar'), detail=document.getElementById('asaModDetail');
+  if(detail){ detail.style.display='none'; detail.innerHTML=''; }
+  if(grid) grid.style.display='';
+  if(toolbar) toolbar.style.display='';
 }
 async function asaInstallFromBrowse(id, name, btn){
   const s=getActive(); if(!s) return;

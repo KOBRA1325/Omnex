@@ -6157,17 +6157,52 @@ ipcMain.handle('ark-move-mod', (e, { serverId, id, dir }) => {
   if (i > -1 && j >= 0 && j < s.arkMods.length) { const t = s.arkMods[i]; s.arkMods[i] = s.arkMods[j]; s.arkMods[j] = t; saveData(); }
   return { ok: true, mods: s.arkMods };
 });
-ipcMain.handle('curseforge-search', async (e, { query = '' } = {}) => {
+ipcMain.handle('curseforge-search', async (e, { query = '', index = 0 } = {}) => {
   try {
     const q = String(query || '').trim();
-    const params = `gameId=${CF_ASA_GAME_ID}&pageSize=30&sortField=${q ? 1 : 2}&sortOrder=desc${q ? `&searchFilter=${encodeURIComponent(q)}` : ''}`;
+    const pageSize = 40;
+    const idx = Math.max(0, Number(index) || 0);
+    const params = `gameId=${CF_ASA_GAME_ID}&pageSize=${pageSize}&index=${idx}&sortField=${q ? 1 : 2}&sortOrder=desc${q ? `&searchFilter=${encodeURIComponent(q)}` : ''}`;
     const r = await cfApi(`/v1/mods/search?${params}`);
     const mods = (r.data || []).map(m => ({
       id: String(m.id), name: m.name || '', summary: m.summary || '',
       logo: (m.logo && m.logo.thumbnailUrl) || (m.logo && m.logo.url) || '',
       downloads: m.downloadCount || 0, author: (m.authors && m.authors[0] && m.authors[0].name) || '',
     }));
-    return { ok: true, mods };
+    // CurseForge caps index+pageSize at 10000; also stop when a short page comes back.
+    const pg = r.pagination || {};
+    const total = Math.min(pg.totalCount || 0, 10000);
+    const hasMore = mods.length === pageSize && (idx + pageSize) < total && (idx + pageSize) < 10000;
+    return { ok: true, mods, index: idx, hasMore };
+  } catch (err) {
+    const code = err.message === 'no-key' ? 'no-key' : /invalid/i.test(err.message) ? 'bad-key' : err.message;
+    return { ok: false, error: code };
+  }
+});
+
+// Full details for one mod (for the Browse detail view): metadata + rendered
+// HTML description. Best-effort; description fetched from the dedicated endpoint.
+ipcMain.handle('curseforge-mod', async (e, id) => {
+  try {
+    const r = await cfApi(`/v1/mods/${encodeURIComponent(String(id))}`);
+    const m = r.data || {};
+    let description = '';
+    try { const d = await cfApi(`/v1/mods/${encodeURIComponent(String(id))}/description`); description = (d && d.data) || ''; } catch (e2) {}
+    return {
+      ok: true,
+      mod: {
+        id: String(m.id || id), name: m.name || '', summary: m.summary || '',
+        logo: (m.logo && m.logo.url) || (m.logo && m.logo.thumbnailUrl) || '',
+        downloads: m.downloadCount || 0,
+        author: (m.authors && m.authors[0] && m.authors[0].name) || '',
+        authors: (m.authors || []).map(a => a.name).filter(Boolean),
+        categories: (m.categories || []).map(c => c.name).filter(Boolean),
+        url: (m.links && m.links.websiteUrl) || '',
+        updated: m.dateModified || '',
+        screenshots: (m.screenshots || []).map(sc => sc.url || sc.thumbnailUrl).filter(Boolean),
+        description,
+      },
+    };
   } catch (err) {
     const code = err.message === 'no-key' ? 'no-key' : /invalid/i.test(err.message) ? 'bad-key' : err.message;
     return { ok: false, error: code };

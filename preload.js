@@ -178,6 +178,7 @@ contextBridge.exposeInMainWorld('nexus', {
   arkToggleMod:          (serverId, id, enabled) => ipcRenderer.invoke('ark-toggle-mod', { serverId, id, enabled }),
   arkMoveMod:            (serverId, id, dir) => ipcRenderer.invoke('ark-move-mod', { serverId, id, dir }),
   curseforgeSearch:      (opts)              => ipcRenderer.invoke('curseforge-search', opts),
+  curseforgeMod:         (id)                => ipcRenderer.invoke('curseforge-mod', id),
 
   // Auto-restart
   getAutoRestart:    (id)          => ipcRenderer.invoke('get-autorestart', id),

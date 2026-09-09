@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' file: https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com https://images.steamusercontent.com https://media.forgecdn.net data:; frame-src 'self' http: https:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' file: https://cdn.cloudflare.steamstatic.com https://steamuserimages-a.akamaihd.net https://api.qrserver.com https://mc-heads.net https://cdn.discordapp.com https://cdn.modrinth.com https://images.steamusercontent.com https://media.forgecdn.net https://*.forgecdn.net data:; frame-src 'self' http: https:">
 <title>Omnex</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
@@ -784,6 +784,8 @@
       <div class="mod-grid" id="asaBrowseResults" style="max-height:52vh; overflow:auto">
         <div class="empty-msg-sm" style="padding:20px">Loading…</div>
       </div>
+      <!-- Mod detail (click a card) -->
+      <div id="asaModDetail" class="mod-detail" style="display:none; max-height:56vh; overflow:auto"></div>
     </div>
 
     <!-- INSTALLED -->
