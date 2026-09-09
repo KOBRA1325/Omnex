@@ -1648,6 +1648,9 @@ function updateMcVisibility() {
   const tr = document.getElementById('terrariaOptions'); if(tr){
     tr.style.display = selectedGame.name === 'Terraria' ? '' : 'none';
   }
+  const asa = document.getElementById('asaOptions'); if(asa){
+    asa.style.display = selectedGame.name === 'Ark: Survival Ascended' ? '' : 'none';
+  }
 }
 function pickMcType(type) {
   selectedMcType = type;

@@ -108,7 +108,6 @@
       <div class="empty-msg">No servers yet.<br/>Click + Add Server below.</div>
     </div>
     <button class="add-server-btn" onclick="openAddModal()">+ Add Server</button>
-    <button class="add-server-btn" style="margin-top:6px; font-size:12px" onclick="openClusterWizard()">🦖 Create ARK Cluster</button>
   </div>
 
   <!-- DASHBOARD VIEW -->
@@ -580,6 +579,16 @@
           <div class="mc-type-btn" data-ttype="tmodloader" onclick="pickTerrariaType('tmodloader')">
             <span class="mc-type-icon">🧩</span><span>tModLoader</span><small>Modded · Steam Workshop</small>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="asaOptions" style="display:none">
+      <div class="form-row">
+        <label class="form-label">Multiple maps?</label>
+        <div style="display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 12px">
+          <div style="flex:1; font-size:12px; color:var(--text-dim); line-height:1.5">Want a <b>cluster</b> — several maps players can transfer between? Set it up in one step instead of installing each map separately.</div>
+          <button class="btn-modal-cancel" style="white-space:nowrap; pointer-events:all" onclick="closeAddModal(); openClusterWizard();">🦖 Create a cluster</button>
         </div>
       </div>
     </div>
