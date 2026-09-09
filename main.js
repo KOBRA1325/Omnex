@@ -292,7 +292,7 @@ const GAME_DEFS = {
   'Rust':            { type:'steam', serverAppId:'258550', startExe:'RustDedicated.exe',        startArgs:(d,s)=>['-batchmode','+server.port',String(s.port||28015),'+server.maxplayers','50','+rcon.web','1'] },
   'Satisfactory':    { type:'steam', serverAppId:'1690800',startExe:'FactoryServer.exe',        startArgs:(d,s)=>['-Port='+(s.port||15777)] },
   'Project Zomboid': { type:'steam', serverAppId:'380870', startExe:'ProjectZomboidServer.bat', startArgs:(d,s)=>['-port',String(s.port||16261)] },
-  'Ark: Survival':   { type:'steam', serverAppId:'376030', startExe:'ShooterGameServer.exe',    startArgs:(d,s)=>[`TheIsland?listen?Port=${s.port||7777}?MaxPlayers=20`,'-server','-log'] },
+  'Ark: Survival Evolved': { type:'steam', serverAppId:'376030', startExe:'ShooterGameServer.exe', startArgs:(d,s)=>[`TheIsland?listen?Port=${s.port||7777}?MaxPlayers=20`,'-server','-log'] },
   'Ark: Survival Ascended': { type:'steam', serverAppId:'2430930', startExe:'ArkAscendedServer.exe', startArgs:(d,s)=>{
     const pw = s.rconPassword || 'omnex';
     const map = s.arkMap || 'TheIsland_WP';
@@ -354,6 +354,15 @@ let appData = loadData();
       s.showInPublicList = true;
       changed = true;
     }
+  }
+  if (changed) saveData();
+})();
+// Migration: the old "Ark: Survival" entry was actually Survival Evolved — rename
+// existing records so they still match GAME_DEFS/config after the display rename.
+(function migrateArkNames() {
+  let changed = false;
+  for (const s of appData.servers || []) {
+    if (s.game === 'Ark: Survival') { s.game = 'Ark: Survival Evolved'; changed = true; }
   }
   if (changed) saveData();
 })();
@@ -1338,7 +1347,7 @@ function syncServerConfig(serverId, server, isInstall = false) {
       // Server name is set via -servername launch arg (already handled in startArgs)
     }
 
-    else if (server.game === 'Ark: Survival' || server.game === 'Ark: Survival Ascended') {
+    else if (server.game === 'Ark: Survival Evolved' || server.game === 'Ark: Survival Ascended') {
       const iniPath = path.join(server.installDir, 'ShooterGame', 'Saved', 'Config', 'WindowsServer', 'GameUserSettings.ini');
       if (fs.existsSync(iniPath)) {
         let ini = fs.readFileSync(iniPath, 'utf8');
@@ -2010,7 +2019,7 @@ const GAME_CONFIG_DEFS = {
       ]},
     ],
   },
-  'Ark: Survival': {
+  'Ark: Survival Evolved': {
     file: 'ShooterGame/Saved/Config/WindowsServer/GameUserSettings.ini',
     props: [
       { group: '🌍 Server', props: [
@@ -2428,9 +2437,9 @@ const GAME_CONFIG_DEFS = {
 // Ark: Survival Ascended uses the same GameUserSettings.ini schema as Evolved,
 // plus a Launch Options group for ASA-only launch flags (server fields, not ini keys).
 GAME_CONFIG_DEFS['Ark: Survival Ascended'] = {
-  file: GAME_CONFIG_DEFS['Ark: Survival'].file,
+  file: GAME_CONFIG_DEFS['Ark: Survival Evolved'].file,
   props: [
-    ...GAME_CONFIG_DEFS['Ark: Survival'].props,
+    ...GAME_CONFIG_DEFS['Ark: Survival Evolved'].props,
     { group: '🚀 Launch Options', props: [
       { key: 'noBattlEye', label: 'Disable BattlEye Anti-Cheat', type: 'serverBool',
         desc: 'Adds -NoBattlEye at launch. Some players need this to connect to unofficial servers. Restart to apply.' },
@@ -4854,7 +4863,7 @@ ipcMain.handle('browse-folder', async () => {
 // Default listen ports per game — used when we can't read the real one from a config file.
 const GAME_DEFAULT_PORTS = {
   'Minecraft':'25565', 'CS2':'27015', 'Valheim':'2456', 'Rust':'28015', 'Satisfactory':'15777',
-  'Project Zomboid':'16261', 'Ark: Survival':'7777', 'V Rising':'9876', 'Terraria':'7777',
+  'Project Zomboid':'16261', 'Ark: Survival Evolved':'7777', 'V Rising':'9876', 'Terraria':'7777',
   '7 Days to Die':'26900', 'Palworld':'8211', 'Enshrouded':'15636', 'Farming Simulator 25':'10823',
   'Ark: Survival Ascended':'7777',
 };
@@ -5713,7 +5722,7 @@ function getGameLogPath(server) {
     case 'Palworld':
       // Palworld log location — most recent per-run log
       return findLatestLog(path.join(server.installDir, 'Pal', 'Saved', 'Logs'), '.log');
-    case 'Ark: Survival':
+    case 'Ark: Survival Evolved':
     case 'Ark: Survival Ascended':
       return findLatestLog(path.join(server.installDir, 'ShooterGame', 'Saved', 'Logs'), '.log');
     case 'V Rising':

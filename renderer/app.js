@@ -173,7 +173,7 @@ const GAMES = [
   { name:'Rust',            port:'28015', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/252490/capsule_sm_120.jpg',  fallback:'🏕️' },
   { name:'Satisfactory',    port:'15777', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/526870/capsule_sm_120.jpg',  fallback:'🏭' },
   { name:'Project Zomboid', port:'16261', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/108600/capsule_sm_120.jpg',  fallback:'🧟' },
-  { name:'Ark: Survival',   port:'7777',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/346110/capsule_sm_120.jpg',  fallback:'🦕' },
+  { name:'Ark: Survival Evolved', port:'7777',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/346110/capsule_sm_120.jpg',  fallback:'🦕' },
   { name:'Ark: Survival Ascended', port:'7777', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/2399830/capsule_sm_120.jpg', fallback:'🦖' },
   { name:'V Rising',        port:'9876',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1604030/capsule_sm_120.jpg', fallback:'🧛' },
   { name:'Terraria',        port:'7777',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/105600/capsule_sm_120.jpg',  fallback:'🌳' },
@@ -1662,7 +1662,7 @@ function pickTerrariaType(type) {
 }
 function updateInstallInfo() {
   const g = selectedGame;
-  const steamGames = ['CS2','Valheim','Rust','Satisfactory','Project Zomboid','Ark: Survival','Ark: Survival Ascended','V Rising','Terraria','7 Days to Die','Palworld','Enshrouded'];
+  const steamGames = ['CS2','Valheim','Rust','Satisfactory','Project Zomboid','Ark: Survival Evolved','Ark: Survival Ascended','V Rising','Terraria','7 Days to Die','Palworld','Enshrouded'];
   const isSteam = steamGames.includes(g.name);
   const existing = servers.filter(s => s.game === g.name);
   const countNote = existing.length > 0 ? ` You already have ${existing.length} ${g.name} server${existing.length>1?'s':''} — this will create a new one.` : '';  const el = document.getElementById('installInfoText'); if(!el) return;
