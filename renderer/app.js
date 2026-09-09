@@ -181,6 +181,7 @@ const GAMES = [
   { name:'Palworld',        port:'8211',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1623730/capsule_sm_120.jpg', fallback:'🐾' },
   { name:'Enshrouded',      port:'15636', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1203620/capsule_sm_120.jpg', fallback:'🌫️' },
   { name:'Farming Simulator 25', port:'10823', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/2300320/capsule_sm_120.jpg', fallback:'🚜', importOnly:true },
+  { name:'FiveM',           port:'30120', icon:'', fallback:'🚗' },
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -1671,6 +1672,8 @@ function updateInstallInfo() {
   const countNote = existing.length > 0 ? ` You already have ${existing.length} ${g.name} server${existing.length>1?'s':''} — this will create a new one.` : '';  const el = document.getElementById('installInfoText'); if(!el) return;
   const info = g.importOnly
     ? `${g.name} is import-only — install its dedicated server from your own account, then use the Import tab to add it. Omnex can't download it automatically.`
+    : g.name === 'FiveM'
+    ? `Omnex will download the recommended FXServer build + default resources (no Steam/account needed). You'll need a FREE Cfx.re license key from keymaster.fivem.net — add it in Config, then Start. RP frameworks (QBCore/ESX) are add-ons you install after.`
     : g.name === 'Terraria'
     ? (selectedTerrariaType === 'tmodloader'
         ? `Omnex will install the tModLoader dedicated server via SteamCMD (free, no Steam account) and configure it. Mods are added after install from the Mods panel.`
@@ -2287,6 +2290,10 @@ function renderSteamConfig(card, result, arHtml, s, scope) {
         const svVal = !!(s && s[def.key]);
         html += `<button class="cfg-bool-btn ${svVal?'on':''}" onclick="toggleServerField('${s.id}','${def.key}',this)">
           <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${svVal?'ON':'OFF'}</span></button>`;
+      } else if (def.type==='serverText' || def.type==='serverNumber') {
+        // Stored on the server object (written into the game config on start).
+        const sv = (s && s[def.key] != null) ? s[def.key] : '';
+        html += `<input class="config-input" type="${def.type==='serverNumber'?'number':(def.secret?'password':'text')}" value="${escapeHtml(String(sv))}" placeholder="${def.placeholder||''}" onchange="setServerFieldFromInput('${s.id}','${def.key}','${def.type}',this.value)">`;
       } else if (def.type==='bool'||def.type==='bool01') {
         const checked=String(val).toLowerCase()==='true'||val==='1', tv=def.type==='bool01'?'1':'true', fv=def.type==='bool01'?'0':'false';
         html += `<button class="cfg-bool-btn ${checked?'on':''}" onclick="toggleSteamBool('${def.key}','${tv}','${fv}',this)">
@@ -2329,6 +2336,13 @@ function toggleSteamBool(key, tv, fv, btn) {
   const cur=window._steamConfigProps[key]; const next=cur===tv?fv:tv;
   window._steamConfigProps[key]=next; btn.classList.toggle('on',next===tv);
   btn.querySelector('.cfg-bool-val').textContent=next;
+}
+async function setServerFieldFromInput(serverId, key, type, value) {
+  const s = servers.find(sv => sv.id === serverId); if (!s) return;
+  const v = type === 'serverNumber' ? (parseInt(value, 10) || 0) : String(value);
+  s[key] = v;
+  try { await window.nexus.setServerField(serverId, key, v); showToast('⚙️', 'Saved — restart to apply'); }
+  catch (e) { showToast('❌', e.message); }
 }
 async function toggleServerField(serverId, key, btn) {
   const s = servers.find(sv => sv.id === serverId);
