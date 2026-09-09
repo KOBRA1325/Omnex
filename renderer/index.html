@@ -752,6 +752,36 @@
   </div>
 </div>
 
+<!-- FIVEM RP FRAMEWORK MODAL -->
+<div class="modal-overlay" id="fivemModal">
+  <div class="modal" style="width:min(600px, 95vw)">
+    <div class="modal-title" style="justify-content:space-between">
+      <span>🚗 &nbsp;FiveM RP Framework · <span id="fivemModalTitle"></span></span>
+      <button class="btn-modal-cancel" onclick="closeFivemFramework()">✕ Close</button>
+    </div>
+    <div class="empty-msg-sm" style="text-align:left; padding:2px 0 12px; line-height:1.6">
+      Installs an RP framework's <b>core</b> + its dependencies (<code>oxmysql</code>, <code>ox_lib</code>) into your server's resources and wires up <code>server.cfg</code>. This is a foundation you build on — full frameworks have many more resources.
+    </div>
+    <div id="fivemFwGrid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px">
+      <label class="cluster-map" style="flex-direction:column; align-items:flex-start; gap:4px">
+        <span style="display:flex; align-items:center; gap:8px"><input type="radio" name="fivemFw" value="qbox" checked> <b>QBox (QBCore)</b></span>
+        <small style="color:var(--text-dim)">Modern, maintained QBCore fork (qbx_core)</small>
+      </label>
+      <label class="cluster-map" style="flex-direction:column; align-items:flex-start; gap:4px">
+        <span style="display:flex; align-items:center; gap:8px"><input type="radio" name="fivemFw" value="esx"> <b>ESX</b></span>
+        <small style="color:var(--text-dim)">es_extended (esx_core)</small>
+      </label>
+    </div>
+    <div class="empty-msg-sm" style="text-align:left; padding:0 0 6px; line-height:1.6; color:var(--yellow)">
+      ⚠ Frameworks need a <b>MySQL / MariaDB database</b> Omnex can't create for you. After install: install MySQL, create a database, import the framework's <code>.sql</code> schema, then set <code>mysql_connection_string</code> in Config or server.cfg. See the framework's docs.
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px">
+      <button class="btn-modal-cancel" onclick="closeFivemFramework()">Cancel</button>
+      <button class="btn-modal-save" id="fivemFwBtn" onclick="installFivemFramework()">Install framework</button>
+    </div>
+  </div>
+</div>
+
 <!-- ARK CLUSTER WIZARD MODAL -->
 <div class="modal-overlay" id="clusterModal">
   <div class="modal" style="width:min(560px, 95vw)">

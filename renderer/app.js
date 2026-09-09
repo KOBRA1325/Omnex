@@ -504,6 +504,29 @@ function openClusterWizard() {
   showModal('clusterModal');
 }
 function closeClusterWizard() { hideModal('clusterModal'); }
+
+// ── FiveM RP framework helper ───────────────────────────────────────────────────
+function openFivemFramework() {
+  const s = getActive(); if (!s) return;
+  const t = document.getElementById('fivemModalTitle'); if (t) t.textContent = s.name;
+  showModal('fivemModal');
+}
+function closeFivemFramework() { hideModal('fivemModal'); }
+async function installFivemFramework() {
+  const s = getActive(); if (!s) return;
+  const fw = (document.querySelector('#fivemFwGrid input[name="fivemFw"]:checked') || {}).value || 'qbox';
+  const btn = document.getElementById('fivemFwBtn');
+  if (!confirm(`Install ${fw === 'esx' ? 'ESX' : 'QBox (QBCore)'} into this server? This downloads the core + oxmysql + ox_lib and edits server.cfg.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
+  try {
+    const r = await window.nexus.installFivemFramework(s.id, fw);
+    if (r && r.ok) {
+      showToast('🚗', `${fw === 'esx' ? 'ESX' : 'QBox'} installed — set up MySQL next (see console)`);
+      closeFivemFramework();
+    } else showToast('❌', (r && r.error) || 'Framework install failed');
+  } catch (e) { showToast('❌', e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = 'Install framework'; }
+}
 async function createCluster() {
   const name = (document.getElementById('clusterName')?.value || '').trim();
   const basePort = parseInt(document.getElementById('clusterBasePort')?.value, 10) || 7777;
@@ -1461,7 +1484,8 @@ function renderHeader() {
     // explains when a server (Vanilla) can't load mods. Also show for tModLoader.
     const isTml = s.game==='Terraria' && s.terrariaType==='tmodloader';
     const isAsaMods = s.game==='Ark: Survival Ascended';
-    btnMods.style.display = (s.game==='Minecraft' || isTml || isAsaMods) ? '' : 'none';
+    const isFivem = s.game==='FiveM';
+    btnMods.style.display = (s.game==='Minecraft' || isTml || isAsaMods || isFivem) ? '' : 'none';
     btnMods.disabled = false;
   }
   if(btnWS) btnWS.style.display = 'none';
@@ -2733,6 +2757,8 @@ async function openModManager(){
   if(s.game==='Terraria' && s.terrariaType==='tmodloader'){ openTmlMods(); return; }
   // Ark: Survival Ascended has its own (CurseForge) mod manager.
   if(s.game==='Ark: Survival Ascended'){ openAsaMods(); return; }
+  // FiveM: the "Mods" button opens the RP framework helper.
+  if(s.game==='FiveM'){ openFivemFramework(); return; }
   // If the loader wasn't recorded, detect it from the install folder first.
   if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
     try { const r=await window.nexus.detectMcLoader(s.id); if(r&&r.detected&&r.loader){ s.mcType=r.loader; renderHeader(); } } catch(e){}

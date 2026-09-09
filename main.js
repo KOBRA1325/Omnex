@@ -1691,6 +1691,74 @@ function server_setExecForFiveM(serverId, fxPath) {
   if (s) { s.execPath = fxPath; saveData(); }
 }
 
+// Resolve a GitHub release asset's download URL by name (latest release).
+async function ghLatestAsset(repo, assetName) {
+  const rel = await fetchJSON(`https://api.github.com/repos/${repo}/releases/latest`);
+  const a = (rel && rel.assets || []).find(x => x.name === assetName);
+  if (a) return a.browser_download_url;
+  // fall back to the source zipball if the release ships no built asset
+  return (rel && rel.zipball_url) || `https://codeload.github.com/${repo}/zip/refs/heads/main`;
+}
+// Download a FiveM resource zip and place it under resources/<resourceName>, finding
+// the folder that actually contains the fxmanifest (release zips vary in nesting).
+async function fivemInstallResource(serverId, url, resourcesRoot, resourceName) {
+  const tmp = path.join(resourcesRoot, '_tmp_' + resourceName);
+  const zip = tmp + '.zip';
+  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  log(serverId, 'info', `⬇  ${resourceName}...`);
+  await downloadFile(url, zip, () => {});
+  await extractZip(zip, tmp);
+  const hasManifest = d => { try { return fs.readdirSync(d).some(f => /^fxmanifest\.(lua|yaml)$|^__resource\.lua$/i.test(f)); } catch (e) { return false; } };
+  let root = tmp;
+  if (!hasManifest(root)) {
+    const dirs = fs.readdirSync(root).map(n => path.join(root, n)).filter(p => { try { return fs.statSync(p).isDirectory(); } catch (e) { return false; } });
+    root = dirs.find(hasManifest) || dirs[0] || root;
+  }
+  const dest = path.join(resourcesRoot, resourceName);
+  try { fs.rmSync(dest, { recursive: true, force: true }); } catch (e) {}
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(root)) fs.cpSync(path.join(root, entry), path.join(dest, entry), { recursive: true });
+  try { fs.rmSync(zip, { force: true }); fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+}
+// Ensure a set of resources + a mysql convar are present in server.cfg.
+function fivemPatchCfgFramework(server, ensures) {
+  const cfgPath = path.join(server.installDir, 'server-data', 'server.cfg');
+  if (!fs.existsSync(cfgPath)) return;
+  let cfg = fs.readFileSync(cfgPath, 'utf8');
+  if (!/^set mysql_connection_string /m.test(cfg)) {
+    cfg += `\n# Set your MySQL/MariaDB connection (Omnex can't create the database for you)\nset mysql_connection_string "mysql://root:@localhost/fivem?charset=utf8mb4"\n`;
+  }
+  const block = ['', '# RP framework (added by Omnex)']
+    .concat(ensures.filter(r => !new RegExp(`^ensure ${r}\\b`, 'm').test(cfg)).map(r => `ensure ${r}`));
+  if (block.length > 2) cfg += block.join('\n') + '\n';
+  fs.writeFileSync(cfgPath, cfg);
+}
+ipcMain.handle('install-fivem-framework', async (e, { serverId, framework }) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s || s.game !== 'FiveM') return { ok: false, error: 'Not a FiveM server' };
+  if (!s.installDir || !fs.existsSync(path.join(s.installDir, 'server-data'))) return { ok: false, error: 'Install the FiveM server first.' };
+  const resDir = path.join(s.installDir, 'server-data', 'resources');
+  fs.mkdirSync(resDir, { recursive: true });
+  const ensures = [];
+  try {
+    log(serverId, 'info', `Installing ${framework === 'esx' ? 'ESX' : 'QBox (QBCore)'} framework + dependencies...`);
+    await fivemInstallResource(serverId, await ghLatestAsset('overextended/oxmysql', 'oxmysql.zip'), resDir, 'oxmysql'); ensures.push('oxmysql');
+    await fivemInstallResource(serverId, await ghLatestAsset('overextended/ox_lib', 'ox_lib.zip'), resDir, 'ox_lib'); ensures.push('ox_lib');
+    if (framework === 'esx') {
+      await fivemInstallResource(serverId, 'https://codeload.github.com/esx-framework/esx_core/zip/refs/heads/main', resDir, 'es_extended'); ensures.push('es_extended');
+    } else {
+      await fivemInstallResource(serverId, await ghLatestAsset('Qbox-project/qbx_core', 'qbx_core.zip'), resDir, 'qbx_core'); ensures.push('qbx_core');
+    }
+    fivemPatchCfgFramework(s, ensures);
+    s.fivemFramework = framework; saveData();
+    log(serverId, 'success', `✔ ${framework === 'esx' ? 'ESX' : 'QBox'} installed. Next: set up a MySQL database + import the framework's SQL, then set mysql_connection_string in server.cfg.`);
+    return { ok: true, framework, ensures };
+  } catch (err) {
+    log(serverId, 'error', `Framework install failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
 async function installTerraria(serverId, installDir, config) {
   const url = `https://terraria.org/api/download/pc-dedicated-server/terraria-server-${TERRARIA_SERVER_VERSION}.zip`;
   const zipPath = path.join(installDir, 'terraria-server.zip');
