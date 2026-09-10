@@ -527,7 +527,12 @@ function emit(ch, data)          { mainWindow?.webContents.send(ch, data); }
 // server's output instead of clearing the console. Capped as a ring buffer.
 const consoleHistory = {};
 const CONSOLE_HISTORY_MAX = 800;
+// Strip ANSI escape/color sequences (e.g. FXServer emits "\x1b[38;5;83m…")
+// so the Live Console shows clean text instead of raw "[38;5;83m" garbage.
+const ANSI_RE = /[][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-PR-TZcf-ntqry=><~]/g;
+function stripAnsi(s) { return typeof s === 'string' ? s.replace(ANSI_RE, '') : s; }
 function log(id, type, text)     {
+  text = stripAnsi(text);
   const ts = new Date().toLocaleTimeString('en-US',{hour12:false});
   if (id != null) {
     const buf = consoleHistory[id] || (consoleHistory[id] = []);
@@ -1369,7 +1374,7 @@ function syncServerConfig(serverId, server, isInstall = false) {
       // Generate/patch server-data/server.cfg from the server's fields. FiveM's cfg
       // isn't ini/xml, so we own a small set of lines and patch them (or write a
       // fresh template on first install), leaving the user's other edits intact.
-      const cfgPath = path.join(server.installDir, 'server-data', 'server.cfg');
+      const cfgPath = path.join(fivemDataDir(server), 'server.cfg');
       const fmPort = String(port || server.port || 30120);
       const host = (server.name || 'Omnex FiveM Server').replace(/"/g, '');
       const maxc = String(server.maxPlayers || 32);
@@ -1382,7 +1387,9 @@ function syncServerConfig(serverId, server, isInstall = false) {
         patch(/^endpoint_add_udp .*$/m, `endpoint_add_udp "0.0.0.0:${fmPort}"`);
         patch(/^sv_maxclients .*$/m, `sv_maxclients ${maxc}`);
         patch(/^sv_hostname .*$/m, `sv_hostname "${host}"`);
-        patch(/^sv_licenseKey .*$/m, `sv_licenseKey "${lic}"`);
+        // Never wipe an imported server's existing key: only patch when the user
+        // has actually set a license key in Omnex's Config.
+        if (lic) patch(/^sv_licenseKey .*$/m, `sv_licenseKey "${lic}"`);
         fs.writeFileSync(cfgPath, cfg);
       } else {
         fs.writeFileSync(cfgPath, [
@@ -1691,6 +1698,45 @@ function server_setExecForFiveM(serverId, fxPath) {
   if (s) { s.execPath = fxPath; saveData(); }
 }
 
+// Resolve a FiveM server's data directory — the working dir that holds server.cfg
+// and resources/. Omnex-installed servers use installDir/server-data; imported
+// servers may keep that layout anywhere, so honor the path detected at import time.
+function fivemDataDir(server) {
+  if (server && server.fivemDataDir) {
+    const p = path.isAbsolute(server.fivemDataDir) ? server.fivemDataDir : path.join(server.installDir, server.fivemDataDir);
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(server.installDir, 'server-data');
+}
+
+// Find a directory by name (case-insensitive) within a tree. Mirrors
+// findFileRecursive but matches folders (e.g. locating a FiveM "resources" dir).
+function findDirRecursive(dir, name, maxDepth = 4) {
+  if (maxDepth === 0) return null;
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name.toLowerCase() === name.toLowerCase()) return path.join(dir, entry.name);
+      const found = findDirRecursive(path.join(dir, entry.name), name, maxDepth - 1);
+      if (found) return found;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// Detect an imported FiveM server's real layout: the FXServer.exe binary and the
+// working directory that actually holds server.cfg / resources/ (arranged however
+// the user had it before importing). Falls back to installDir if unsure.
+function detectFivemLayout(installDir) {
+  const exe = findExe(installDir, 'FXServer.exe') || '';
+  let dataDir = '';
+  const cfg = findFileRecursive(installDir, 'server.cfg', 5);
+  if (cfg) dataDir = path.dirname(cfg);
+  if (!dataDir) { const res = findDirRecursive(installDir, 'resources', 4); if (res) dataDir = path.dirname(res); }
+  if (!dataDir) dataDir = installDir;
+  return { exe, dataDir };
+}
+
 // Resolve a GitHub release asset's download URL by name (latest release).
 async function ghLatestAsset(repo, assetName) {
   const rel = await fetchJSON(`https://api.github.com/repos/${repo}/releases/latest`);
@@ -1722,7 +1768,7 @@ async function fivemInstallResource(serverId, url, resourcesRoot, resourceName) 
 }
 // Ensure a set of resources + a mysql convar are present in server.cfg.
 function fivemPatchCfgFramework(server, ensures) {
-  const cfgPath = path.join(server.installDir, 'server-data', 'server.cfg');
+  const cfgPath = path.join(fivemDataDir(server), 'server.cfg');
   if (!fs.existsSync(cfgPath)) return;
   let cfg = fs.readFileSync(cfgPath, 'utf8');
   if (!/^set mysql_connection_string /m.test(cfg)) {
@@ -1736,8 +1782,9 @@ function fivemPatchCfgFramework(server, ensures) {
 ipcMain.handle('install-fivem-framework', async (e, { serverId, framework }) => {
   const s = appData.servers.find(x => x.id === serverId);
   if (!s || s.game !== 'FiveM') return { ok: false, error: 'Not a FiveM server' };
-  if (!s.installDir || !fs.existsSync(path.join(s.installDir, 'server-data'))) return { ok: false, error: 'Install the FiveM server first.' };
-  const resDir = path.join(s.installDir, 'server-data', 'resources');
+  const dataDir = fivemDataDir(s);
+  if (!s.installDir || !fs.existsSync(dataDir)) return { ok: false, error: 'Install the FiveM server first.' };
+  const resDir = path.join(dataDir, 'resources');
   fs.mkdirSync(resDir, { recursive: true });
   const ensures = [];
   try {
@@ -5034,6 +5081,26 @@ ipcMain.handle('import-server', async (e, config) => {
     let execPath = '';
     if (def?.startExe) execPath = findExe(installDir, def.startExe) || '';
     if (game === 'Minecraft') execPath = findMinecraftJar(installDir) || execPath;
+    // FiveM: an imported server can arrange FXServer.exe and its server.cfg /
+    // resources/ however the user likes, so detect the real layout and store it.
+    // Also hydrate Omnex's config fields from the existing server.cfg so we
+    // reflect (and never clobber) the user's license key, player cap, and port.
+    if (game === 'FiveM') {
+      const layout = detectFivemLayout(installDir);
+      if (layout.exe) execPath = layout.exe;
+      server.fivemDataDir = layout.dataDir;
+      try {
+        const cfgFile = path.join(layout.dataDir, 'server.cfg');
+        if (fs.existsSync(cfgFile)) {
+          const cfg = fs.readFileSync(cfgFile, 'utf8');
+          const key = cfg.match(/^sv_licenseKey\s+"?([^"\r\n]+)"?/m);        if (key && key[1].trim()) server.licenseKey = key[1].trim();
+          const mc  = cfg.match(/^sv_maxclients\s+(\d+)/m);                   if (mc)  server.maxPlayers = parseInt(mc[1], 10);
+          const ep  = cfg.match(/^endpoint_add_(?:tcp|udp)\s+"?[^:"]*:(\d+)/m); if (ep) server.port = ep[1];
+        }
+      } catch (e) {}
+      log(id, 'dim', `FiveM layout detected — exe: ${execPath ? path.relative(installDir, execPath) : 'not found'}, data: ${path.relative(installDir, layout.dataDir) || '.'}`);
+      if (!execPath) log(id, 'warn', 'FXServer.exe not found in this folder — make sure you imported the folder containing the server artifacts.');
+    }
     server.execPath = execPath;
     server.status   = 'offline';
     saveData();
@@ -5087,6 +5154,10 @@ function detectServerPort(dir, game) {
         const m = (readIf(c) || '').match(/"Port"\s*:\s*(\d+)/);
         if (m) return m[1];
       }
+    } else if (game === 'FiveM') {
+      const cfg = findFileRecursive(dir, 'server.cfg', 5);
+      const m = (cfg ? (readIf(cfg) || '') : '').match(/^endpoint_add_(?:tcp|udp)\s+"?[^:"]*:(\d+)/m);
+      if (m) return m[1];
     }
   } catch(e) {}
   return null;
@@ -6111,9 +6182,9 @@ async function startServerById(id) {
     // FXServer runs from server-data (resources resolve relative to cwd) and reads
     // server.cfg. Regenerate the cfg first so config/port/name edits take effect.
     try { syncServerConfig(id, server, false); } catch (e) {}
-    exe  = server.execPath || findExe(path.join(server.installDir, 'server'), 'FXServer.exe');
+    exe  = server.execPath || findExe(path.join(server.installDir, 'server'), 'FXServer.exe') || findExe(server.installDir, 'FXServer.exe');
     args = ['+exec', 'server.cfg'];
-    cwdOverride = path.join(server.installDir, 'server-data');
+    cwdOverride = fivemDataDir(server);
     if (!String(server.licenseKey || '').trim()) log(id, 'warn', 'No Cfx.re license key set (Config → License Key). FiveM won\'t start without one — get a free one at https://keymaster.fivem.net');
   } else if (server.useShell) {
     exe  = server.execPath;
