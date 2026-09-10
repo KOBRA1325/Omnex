@@ -6178,6 +6178,26 @@ async function startServerById(id) {
       forceShell = true;
       log(id, 'warn', dotnetPath ? 'tModLoader.dll not found — using the launcher script (separate window)' : '.NET runtime not found — using the launcher script (separate window)');
     }
+  } else if (server.game === 'Satisfactory') {
+    // FactoryServer.exe is only a launcher — it spawns the real server,
+    // FactoryServer-Win64-Shipping-Cmd.exe, in its OWN console window, so windowsHide
+    // on the launcher can't suppress it. Launch that shipping binary directly (with the
+    // project name as its first arg) so windowsHide hides the window and Omnex owns the
+    // process (Stop kills it directly). The engine still writes FactoryGame.log, which
+    // Omnex tails for console output either way — resolved fresh each launch so it works
+    // regardless of what execPath was saved as.
+    const shipExe = findExe(server.installDir, 'FactoryServer-Win64-Shipping-Cmd.exe');
+    const satPort = server.port || 15777;
+    const baseArgs = server.args ? server.args.split(' ').filter(Boolean) : [`-Port=${satPort}`];
+    if (shipExe) {
+      exe  = shipExe;
+      args = ['FactoryGame', '-unattended', ...baseArgs];
+    } else {
+      // Fallback: the launcher (its child console window will still appear).
+      exe  = server.execPath || findExe(server.installDir, 'FactoryServer.exe');
+      args = baseArgs;
+      log(id, 'warn', 'FactoryServer-Win64-Shipping-Cmd.exe not found — using the launcher; a separate console window may appear.');
+    }
   } else if (server.game === 'FiveM') {
     // FXServer runs from server-data (resources resolve relative to cwd) and reads
     // server.cfg. Regenerate the cfg first so config/port/name edits take effect.
