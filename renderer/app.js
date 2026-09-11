@@ -2278,6 +2278,13 @@ function renderMinecraftConfig(card, props, arHtml, scope) {
   const chgFn  = scope === 'basic' ? 'updateMcPropAndSave' : 'updateMcProp';
   const boolFn = scope === 'basic' ? 'toggleMinecraftPropAndSave' : 'toggleMinecraftProp';
   const basicKeys = new Set(['motd','server-port','max-players']);
+  // server.properties keys whose values are a fixed set — render as dropdowns so
+  // users pick a valid option instead of typing (and mistyping) it. Values are the
+  // modern (1.13+) word forms Minecraft writes by default.
+  const MC_ENUMS = {
+    'gamemode':   ['survival','creative','adventure','spectator'],
+    'difficulty': ['peaceful','easy','normal','hard'],
+  };
   const allGroups = [
     { label:'🌍 World', keys:['level-name','level-seed','gamemode','difficulty','max-players','spawn-protection'] },
     { label:'⚙️ Server', keys:['server-port','server-ip','white-list','enable-whitelist','online-mode','motd'] },
@@ -2294,8 +2301,16 @@ function renderMinecraftConfig(card, props, arHtml, scope) {
     html += `<div class="config-group"><div class="config-group-label">${g.label}</div>`;
     for (const key of g.keys) {
       const val = props[key]??''; const isBool = val==='true'||val==='false';
+      const enumOpts = MC_ENUMS[key];
       html += `<div class="config-row"><div class="config-label">${key}</div>`;
       if (isBool) html += `<button class="cfg-bool-btn ${val==='true'?'on':''}" onclick="${boolFn}('${key}',this)"><span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">${val}</span></button>`;
+      else if (enumOpts) {
+        // Keep an unexpected current value (e.g. an old numeric difficulty) as a selectable option so it isn't lost.
+        const opts = (val && !enumOpts.includes(val)) ? [val, ...enumOpts] : enumOpts;
+        html += `<select class="config-input" onchange="${chgFn}('${key}',this.value)">` +
+          opts.map(o => `<option value="${escapeHtml(o)}" ${o===val?'selected':''}>${escapeHtml(o)}</option>`).join('') +
+          `</select>`;
+      }
       else html += `<input class="config-input" value="${escapeHtml(val)}" onchange="${chgFn}('${key}',this.value)">`;
       html += '</div>';
     }
