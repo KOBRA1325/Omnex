@@ -1392,6 +1392,9 @@ function syncServerConfig(serverId, server, isInstall = false) {
         // Never wipe an imported server's existing key: only patch when the user
         // has actually set a license key in Omnex's Config.
         if (lic) patch(/^sv_licenseKey .*$/m, `sv_licenseKey "${lic}"`);
+        // ox_lib / QBox / ESX all require OneSync. Enable it if the cfg doesn't set
+        // it at all — but never override an explicit `onesync on/off/legacy` choice.
+        if (!/^\s*(set\s+)?onesync\b/mi.test(cfg)) cfg += `\n# OneSync is required by ox_lib / QBox / ESX (added by Omnex)\nset onesync on\n`;
         fs.writeFileSync(cfgPath, cfg);
       } else {
         fs.writeFileSync(cfgPath, [
@@ -1402,6 +1405,9 @@ function syncServerConfig(serverId, server, isInstall = false) {
           `sv_hostname "${host}"`,
           `sets sv_projectName "${host}"`,
           `sets sv_projectDesc "Managed by Omnex"`,
+          ``,
+          `# OneSync — required by ox_lib / QBox / ESX frameworks`,
+          `set onesync on`,
           ``,
           `# Default resources (from cfx-server-data)`,
           `ensure mapmanager`,
