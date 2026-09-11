@@ -2286,7 +2286,7 @@ function renderMinecraftConfig(card, props, arHtml, scope) {
     'difficulty': ['peaceful','easy','normal','hard'],
   };
   const allGroups = [
-    { label:'🌍 World', keys:['level-name','level-seed','gamemode','difficulty','max-players','spawn-protection'] },
+    { label:'🌍 World', keys:['level-name','level-seed','gamemode','difficulty','hardcore','max-players','spawn-protection'] },
     { label:'⚙️ Server', keys:['server-port','server-ip','white-list','enable-whitelist','online-mode','motd'] },
     { label:'🔧 Performance', keys:['view-distance','simulation-distance','max-tick-time'] },
   ];
