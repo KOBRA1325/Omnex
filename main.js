@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, session } = require('electro
 let steamAuth;
 try { steamAuth = require('./steam-auth'); } catch(e) { console.warn('Steam auth library not available'); }
 const path   = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs     = require('fs');
 const https  = require('https');
 const http   = require('http');
@@ -490,6 +490,8 @@ app.on('before-quit', () => {
       }
     } catch(e) {}
   });
+  // Shut down the managed MariaDB (if we started it) so it doesn't outlive Omnex.
+  try { stopMariadb(); } catch(e) {}
 });
 
 async function logSystemJavaInfo() {
@@ -1772,7 +1774,9 @@ function fivemPatchCfgFramework(server, ensures) {
   if (!fs.existsSync(cfgPath)) return;
   let cfg = fs.readFileSync(cfgPath, 'utf8');
   if (!/^set mysql_connection_string /m.test(cfg)) {
-    cfg += `\n# Set your MySQL/MariaDB connection (Omnex can't create the database for you)\nset mysql_connection_string "mysql://root:@localhost/fivem?charset=utf8mb4"\n`;
+    // Placeholder — Omnex overwrites this with its managed-DB connection string
+    // right after (see ensureFivemDatabase/fivemSetConnString).
+    cfg += `\n# Database connection (Omnex sets this to its managed MariaDB)\nset mysql_connection_string "mysql://root@127.0.0.1:3307/fivem?charset=utf8mb4"\n`;
   }
   const block = ['', '# RP framework (added by Omnex)']
     .concat(ensures.filter(r => !new RegExp(`^ensure ${r}\\b`, 'm').test(cfg)).map(r => `ensure ${r}`));
@@ -1799,9 +1803,296 @@ ipcMain.handle('install-fivem-framework', async (e, { serverId, framework }) => 
     fivemPatchCfgFramework(s, ensures);
     s.fivemFramework = framework; saveData();
     log(serverId, 'success', `✔ ${framework === 'esx' ? 'ESX' : 'QBox'} installed. Next: set up a MySQL database + import the framework's SQL, then set mysql_connection_string in server.cfg.`);
+    // Managed database: provision a local MariaDB + wire the connection string so
+    // the user never has to install/run XAMPP. Best-effort schema import from the
+    // framework's own resources.
+    try {
+      const { db, conn } = await ensureFivemDatabase(s, serverId);
+      fivemSetConnString(s, conn);
+      const coreName = framework === 'esx' ? 'es_extended' : 'qbx_core';
+      const coreDir  = path.join(resDir, coreName);
+      const n = await importFrameworkSql(db, coreDir, serverId);
+      log(serverId, 'success', `✔ ${framework === 'esx' ? 'ESX' : 'QBox'} installed with a managed database (${db}, ${n} SQL file(s) imported). Just press Start — no XAMPP needed.`);
+    } catch (dbErr) {
+      log(serverId, 'warn', `Framework is installed, but the managed database step hit a snag: ${dbErr.message}. You can retry it from the FiveM database panel.`);
+    }
     return { ok: true, framework, ensures };
   } catch (err) {
     log(serverId, 'error', `Framework install failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ── FiveM managed database (MariaDB) ──────────────────────────────────────────
+// FiveM RP frameworks (QBox/ESX) need a MySQL/MariaDB database. Rather than making
+// the user install and hand-run XAMPP every session, Omnex provisions its own
+// portable MariaDB: ONE shared engine (downloaded + initialized once) running on
+// port 3307 — deliberately not 3306, so it never clashes with an existing XAMPP
+// MySQL — with a separate database per FiveM server. It's started automatically
+// whenever a FiveM server starts and shut down when Omnex quits.
+const MARIADB_VERSION = '11.4.4';
+const MARIADB_URL     = `https://archive.mariadb.org/mariadb-${MARIADB_VERSION}/winx64-packages/mariadb-${MARIADB_VERSION}-winx64.zip`;
+const MARIADB_DIR     = path.join(USER_DATA, 'mariadb');        // extracted binaries
+const MARIADB_DATA    = path.join(USER_DATA, 'mariadb-data');   // data directory
+const MARIADB_PORT    = 3307;
+let   mariadbProc     = null;
+
+function mariadbBin(name) { return findExe(MARIADB_DIR, name + '.exe'); }
+
+async function ensureMariadbInstalled(logId) {
+  if (mariadbBin('mariadbd')) return true;
+  fs.mkdirSync(MARIADB_DIR, { recursive: true });
+  const zip = path.join(MARIADB_DIR, 'mariadb.zip');
+  if (logId) log(logId, 'info', `Downloading MariaDB ${MARIADB_VERSION} (one-time, ~100 MB)…`);
+  await downloadFile(MARIADB_URL, zip, pct => { if (logId) emit('console-progress', { serverId: logId, text: `⬇  MariaDB  ${pct}%` }); });
+  if (logId) log(logId, 'info', 'Extracting MariaDB…');
+  await extractZip(zip, MARIADB_DIR);
+  try { fs.rmSync(zip, { force: true }); } catch (e) {}
+  if (!mariadbBin('mariadbd')) throw new Error('MariaDB extracted but mariadbd.exe was not found');
+  return true;
+}
+
+async function ensureMariadbInitialized(logId) {
+  if (fs.existsSync(path.join(MARIADB_DATA, 'mysql'))) return true; // already initialized
+  fs.mkdirSync(MARIADB_DATA, { recursive: true });
+  const installer = mariadbBin('mariadb-install-db') || mariadbBin('mysql_install_db');
+  if (!installer) throw new Error('MariaDB install-db tool not found');
+  if (logId) log(logId, 'info', 'Initializing MariaDB data directory (one-time)…');
+  await new Promise((resolve, reject) => {
+    // Windows MariaDB: root defaults to a passwordless TCP login; the Linux-only
+    // --auth-root-authentication-method flag is rejected here, so don't pass it.
+    const p = spawn(installer, [`--datadir=${MARIADB_DATA}`], { windowsHide: true });
+    let err = '';
+    p.stderr.on('data', d => err += d.toString());
+    p.on('close', code => code === 0 ? resolve() : reject(new Error(`mariadb-install-db failed (${code}): ${err.slice(-300)}`)));
+    p.on('error', reject);
+  });
+  return true;
+}
+
+function mariadbClientArgs(extra) { return ['-u', 'root', '-h', '127.0.0.1', '-P', String(MARIADB_PORT), ...extra]; }
+
+async function mariadbQuery(sql) {
+  const client = mariadbBin('mariadb') || mariadbBin('mysql');
+  if (!client) throw new Error('MariaDB client not found');
+  return new Promise((resolve, reject) => {
+    const p = spawn(client, mariadbClientArgs(['-e', sql]), { windowsHide: true });
+    let err = '';
+    p.stderr.on('data', d => err += d.toString());
+    p.on('close', code => code === 0 ? resolve() : reject(new Error(err.trim() || `query failed (${code})`)));
+    p.on('error', reject);
+  });
+}
+
+async function mariadbReady() { try { await mariadbQuery('SELECT 1'); return true; } catch (e) { return false; } }
+
+async function startMariadb(logId) {
+  if (mariadbProc && !mariadbProc.killed) return true;
+  if (await mariadbReady()) return true; // already running (ours or a leftover instance)
+  await ensureMariadbInstalled(logId);
+  await ensureMariadbInitialized(logId);
+  const daemon = mariadbBin('mariadbd');
+  if (logId) log(logId, 'info', `Starting Omnex MariaDB on port ${MARIADB_PORT}…`);
+  mariadbProc = spawn(daemon, [`--datadir=${MARIADB_DATA}`, `--port=${MARIADB_PORT}`, '--bind-address=127.0.0.1', '--console'], { windowsHide: true });
+  mariadbProc.stderr.on('data', d => {
+    const t = d.toString().trim();
+    if (logId && /\[ERROR\]/i.test(t)) log(logId, 'warn', `[MariaDB] ${t.split('\n').slice(-1)[0]}`);
+  });
+  mariadbProc.on('exit', () => { mariadbProc = null; });
+  for (let i = 0; i < 60; i++) { // wait up to ~30s for readiness
+    if (await mariadbReady()) { if (logId) log(logId, 'success', '✔ MariaDB is running.'); return true; }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error('MariaDB did not become ready in time');
+}
+
+function stopMariadb() {
+  try {
+    const admin = mariadbBin('mariadb-admin') || mariadbBin('mysqladmin');
+    if (admin) spawnSync(admin, mariadbClientArgs(['shutdown']), { windowsHide: true, timeout: 8000 });
+  } catch (e) {}
+  try {
+    if (mariadbProc && mariadbProc.pid && process.platform === 'win32') {
+      spawn('taskkill', ['/PID', String(mariadbProc.pid), '/T', '/F'], { windowsHide: true });
+    }
+  } catch (e) {}
+  mariadbProc = null;
+}
+
+function fivemDbName(server) {
+  return ('fivem_' + String(server.id || server.name || 'default')).toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 60);
+}
+
+async function ensureFivemDatabase(server, logId) {
+  await startMariadb(logId);
+  const db = fivemDbName(server);
+  await mariadbQuery(`CREATE DATABASE IF NOT EXISTS \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+  const conn = `mysql://root@127.0.0.1:${MARIADB_PORT}/${db}?charset=utf8mb4`;
+  server.fivemManagedDb = true;
+  server.fivemDbName    = db;
+  server.fivemDbConn    = conn;
+  saveData();
+  if (logId) log(logId, 'success', `✔ Database ready: ${db} (managed by Omnex on port ${MARIADB_PORT}).`);
+  return { db, conn };
+}
+
+// Point server.cfg's mysql_connection_string at the managed database.
+function fivemSetConnString(server, conn) {
+  const cfgPath = path.join(fivemDataDir(server), 'server.cfg');
+  if (!fs.existsSync(cfgPath)) return;
+  let cfg = fs.readFileSync(cfgPath, 'utf8');
+  const line = `set mysql_connection_string "${conn}"`;
+  if (/^set mysql_connection_string .*$/m.test(cfg)) cfg = cfg.replace(/^set mysql_connection_string .*$/m, line);
+  else cfg += `\n# Database managed by Omnex (local MariaDB)\n${line}\n`;
+  fs.writeFileSync(cfgPath, cfg);
+}
+
+// Import a single .sql file into a database via the client's stdin (best-effort).
+function importSqlFile(db, sqlFile) {
+  const client = mariadbBin('mariadb') || mariadbBin('mysql');
+  if (!client) return Promise.reject(new Error('MariaDB client not found'));
+  return new Promise((resolve, reject) => {
+    const p = spawn(client, mariadbClientArgs([db]), { windowsHide: true });
+    let err = '';
+    p.stderr.on('data', d => err += d.toString());
+    p.on('close', code => code === 0 ? resolve() : reject(new Error(err.trim() || `import failed (${code})`)));
+    p.on('error', reject);
+    fs.createReadStream(sqlFile).pipe(p.stdin);
+  });
+}
+
+// Find + import every .sql file inside a framework resource folder (best-effort).
+async function importFrameworkSql(db, resourceDir, logId) {
+  const sqls = [];
+  const walk = (dir, depth) => {
+    if (depth > 4) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const en of entries) {
+      const full = path.join(dir, en.name);
+      if (en.isDirectory()) walk(full, depth + 1);
+      else if (/\.sql$/i.test(en.name)) sqls.push(full);
+    }
+  };
+  walk(resourceDir, 0);
+  if (!sqls.length) { if (logId) log(logId, 'dim', `No .sql files bundled in ${path.basename(resourceDir)} — skipping schema import.`); return 0; }
+  let ok = 0;
+  for (const f of sqls) {
+    try { await importSqlFile(db, f); ok++; if (logId) log(logId, 'dim', `Imported ${path.relative(resourceDir, f)}`); }
+    catch (e) { if (logId) log(logId, 'warn', `Couldn't import ${path.basename(f)}: ${String(e.message).slice(0, 160)}`); }
+  }
+  return ok;
+}
+
+// Provision/repair a FiveM server's managed database on demand (used by the UI).
+ipcMain.handle('setup-fivem-database', async (e, serverId) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s || s.game !== 'FiveM') return { ok: false, error: 'Not a FiveM server' };
+  try {
+    const { db, conn } = await ensureFivemDatabase(s, serverId);
+    fivemSetConnString(s, conn);
+    if (s.fivemFramework) {
+      const coreName = s.fivemFramework === 'esx' ? 'es_extended' : 'qbx_core';
+      const coreDir  = path.join(fivemDataDir(s), 'resources', coreName);
+      if (fs.existsSync(coreDir)) await importFrameworkSql(db, coreDir, serverId);
+    }
+    log(serverId, 'success', `✔ Managed database ready — mysql_connection_string wired. No XAMPP needed.`);
+    return { ok: true, db, conn };
+  } catch (err) {
+    log(serverId, 'error', `Database setup failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-fivem-db-status', (e, serverId) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s) return { ok: false };
+  return { ok: true, managed: !!s.fivemManagedDb, db: s.fivemDbName || null, conn: s.fivemDbConn || null, port: MARIADB_PORT };
+});
+
+// ── Migrate an existing FiveM database into Omnex's managed MariaDB ────────────
+// Imported servers usually already have a populated database (their characters,
+// economy, etc.) in an external MySQL/XAMPP. These handlers bring that data into
+// the managed MariaDB so the user can stop running XAMPP, without losing progress.
+
+// Parse a FiveM/oxmysql connection string — both the URI form
+// (mysql://user:pass@host:port/db?params) and the key=value form
+// (server=...;uid=...;password=...;database=...).
+function parseMysqlConnString(str) {
+  if (!str) return null;
+  str = String(str).trim().replace(/^["']|["']$/g, '');
+  let m = str.match(/^mysql:\/\/(?:([^:@/]+)(?::([^@/]*))?@)?([^:/?]+)(?::(\d+))?\/([^?]+)/i);
+  if (m) return { user: m[1] || 'root', password: m[2] || '', host: m[3] || 'localhost', port: parseInt(m[4]) || 3306, db: m[5] };
+  const kv = {};
+  str.split(';').forEach(pair => { const i = pair.indexOf('='); if (i > 0) kv[pair.slice(0, i).trim().toLowerCase()] = pair.slice(i + 1).trim(); });
+  const db = kv.database || kv.db;
+  if (db) return { user: kv.uid || kv.user || kv.username || kv.userid || 'root', password: kv.password || kv.pwd || '', host: kv.server || kv.host || 'localhost', port: parseInt(kv.port) || 3306, db };
+  return null;
+}
+
+function fivemCurrentConnString(server) {
+  try {
+    const cfg = fs.readFileSync(path.join(fivemDataDir(server), 'server.cfg'), 'utf8');
+    const m = cfg.match(/^set mysql_connection_string\s+"?([^"\r\n]+)"?/m);
+    return m ? m[1].trim() : null;
+  } catch (e) { return null; }
+}
+
+// Dump an external database to a file using bundled mariadb-dump.
+function dumpExternalDb(conn, destFile) {
+  const dumper = mariadbBin('mariadb-dump') || mariadbBin('mysqldump');
+  if (!dumper) return Promise.reject(new Error('mariadb-dump not found (is MariaDB installed yet?)'));
+  const args = ['-h', conn.host, '-P', String(conn.port), '-u', conn.user];
+  if (conn.password) args.push(`-p${conn.password}`);
+  args.push('--single-transaction', '--skip-lock-tables', '--no-tablespaces', conn.db);
+  return new Promise((resolve, reject) => {
+    const out = fs.createWriteStream(destFile);
+    const p = spawn(dumper, args, { windowsHide: true });
+    let err = '';
+    p.stderr.on('data', d => err += d.toString());
+    p.stdout.pipe(out);
+    p.on('error', reject);
+    p.on('close', code => out.end(() => code === 0 ? resolve() : reject(new Error(err.trim().split('\n').slice(-1)[0] || `dump failed (${code})`))));
+  });
+}
+
+ipcMain.handle('migrate-fivem-db-from-mysql', async (e, serverId) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s || s.game !== 'FiveM') return { ok: false, error: 'Not a FiveM server' };
+  const conn = parseMysqlConnString(fivemCurrentConnString(s));
+  if (!conn || !conn.db) return { ok: false, error: "Couldn't read a source database from server.cfg's mysql_connection_string." };
+  if (conn.port === MARIADB_PORT && (conn.host === '127.0.0.1' || conn.host === 'localhost')) return { ok: false, error: 'This server already points at Omnex\'s managed database.' };
+  const tmp = path.join(USER_DATA, `dbmigrate-${Date.now()}.sql`);
+  try {
+    log(serverId, 'info', `Migrating database "${conn.db}" from ${conn.host}:${conn.port} into Omnex's managed MariaDB…`);
+    const { db } = await ensureFivemDatabase(s, serverId);
+    log(serverId, 'dim', 'Dumping source database (make sure the source MySQL/XAMPP is running)…');
+    await dumpExternalDb(conn, tmp);
+    log(serverId, 'dim', 'Importing into the managed database…');
+    await importSqlFile(db, tmp);
+    fivemSetConnString(s, s.fivemDbConn);
+    log(serverId, 'success', `✔ Migrated "${conn.db}" → managed DB "${db}". server.cfg now points at Omnex's MariaDB — you can close XAMPP.`);
+    return { ok: true, from: conn.db, to: db };
+  } catch (err) {
+    log(serverId, 'error', `Migration failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  } finally { try { fs.rmSync(tmp, { force: true }); } catch (e2) {} }
+});
+
+ipcMain.handle('migrate-fivem-db-from-file', async (e, serverId) => {
+  const s = appData.servers.find(x => x.id === serverId);
+  if (!s || s.game !== 'FiveM') return { ok: false, error: 'Not a FiveM server' };
+  const pick = await dialog.showOpenDialog(mainWindow, { title: 'Select a .sql database dump', filters: [{ name: 'SQL dump', extensions: ['sql'] }], properties: ['openFile'] });
+  if (pick.canceled || !pick.filePaths[0]) return { ok: false, error: 'canceled' };
+  try {
+    log(serverId, 'info', `Importing ${path.basename(pick.filePaths[0])} into Omnex's managed database…`);
+    const { db } = await ensureFivemDatabase(s, serverId);
+    await importSqlFile(db, pick.filePaths[0]);
+    fivemSetConnString(s, s.fivemDbConn);
+    log(serverId, 'success', `✔ Imported into managed DB "${db}". server.cfg now points at Omnex's MariaDB — you can close XAMPP.`);
+    return { ok: true, to: db };
+  } catch (err) {
+    log(serverId, 'error', `Import failed: ${err.message}`);
     return { ok: false, error: err.message };
   }
 });
@@ -6202,6 +6493,11 @@ async function startServerById(id) {
     // FXServer runs from server-data (resources resolve relative to cwd) and reads
     // server.cfg. Regenerate the cfg first so config/port/name edits take effect.
     try { syncServerConfig(id, server, false); } catch (e) {}
+    // If this server uses Omnex's managed database, bring MariaDB up first so the
+    // framework can connect the moment FXServer starts — no XAMPP needed.
+    if (server.fivemManagedDb) {
+      try { await startMariadb(id); } catch (e) { log(id, 'warn', `Managed MariaDB failed to start: ${e.message} — the framework may error until the DB is up.`); }
+    }
     exe  = server.execPath || findExe(path.join(server.installDir, 'server'), 'FXServer.exe') || findExe(server.installDir, 'FXServer.exe');
     args = ['+exec', 'server.cfg'];
     cwdOverride = fivemDataDir(server);

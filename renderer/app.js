@@ -510,22 +510,64 @@ function openFivemFramework() {
   const s = getActive(); if (!s) return;
   const t = document.getElementById('fivemModalTitle'); if (t) t.textContent = s.name;
   showModal('fivemModal');
+  refreshFivemDbStatus();
 }
 function closeFivemFramework() { hideModal('fivemModal'); }
+async function refreshFivemDbStatus() {
+  const s = getActive(); if (!s) return;
+  const el = document.getElementById('fivemDbStatus'); if (!el) return;
+  try {
+    const r = await window.nexus.getFivemDbStatus(s.id);
+    if (r && r.ok && r.managed) {
+      el.style.display = 'block';
+      el.innerHTML = `✔ Managed database: <code>${r.db}</code> on port ${r.port}. Starts automatically with the server.`;
+    } else { el.style.display = 'none'; }
+  } catch (e) { el.style.display = 'none'; }
+}
 async function installFivemFramework() {
   const s = getActive(); if (!s) return;
   const fw = (document.querySelector('#fivemFwGrid input[name="fivemFw"]:checked') || {}).value || 'qbox';
   const btn = document.getElementById('fivemFwBtn');
-  if (!confirm(`Install ${fw === 'esx' ? 'ESX' : 'QBox (QBCore)'} into this server? This downloads the core + oxmysql + ox_lib and edits server.cfg.`)) return;
+  if (!confirm(`Install ${fw === 'esx' ? 'ESX' : 'QBox (QBCore)'} into this server? Omnex downloads the core + oxmysql + ox_lib, sets up a local MariaDB database (first time downloads ~100 MB), imports the schema, and edits server.cfg.`)) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Installing…'; }
   try {
     const r = await window.nexus.installFivemFramework(s.id, fw);
     if (r && r.ok) {
-      showToast('🚗', `${fw === 'esx' ? 'ESX' : 'QBox'} installed — set up MySQL next (see console)`);
-      closeFivemFramework();
+      showToast('🚗', `${fw === 'esx' ? 'ESX' : 'QBox'} installed with a managed database — just press Start`);
+      refreshFivemDbStatus();
     } else showToast('❌', (r && r.error) || 'Framework install failed');
   } catch (e) { showToast('❌', e.message); }
   if (btn) { btn.disabled = false; btn.textContent = 'Install framework'; }
+}
+async function setupFivemDatabase() {
+  const s = getActive(); if (!s) return;
+  const btn = document.getElementById('fivemDbBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Setting up database…'; }
+  try {
+    const r = await window.nexus.setupFivemDatabase(s.id);
+    if (r && r.ok) { showToast('🗄', `Database ready: ${r.db}`); refreshFivemDbStatus(); }
+    else showToast('❌', (r && r.error) || 'Database setup failed');
+  } catch (e) { showToast('❌', e.message); }
+  if (btn) { btn.disabled = false; btn.textContent = '🗄 Set up / repair database'; }
+}
+async function migrateFivemDbFromMysql() {
+  const s = getActive(); if (!s) return;
+  if (!confirm("Migrate this server's existing database into Omnex's managed MariaDB?\n\nMake sure your current MySQL/XAMPP is RUNNING. Omnex will copy the database named in your server.cfg, then point the server at its own MariaDB. Your original database is left untouched.")) return;
+  showToast('⤵', 'Migrating database… (watch the console)');
+  try {
+    const r = await window.nexus.migrateFivemDbFromMysql(s.id);
+    if (r && r.ok) { showToast('✅', `Migrated ${r.from} → ${r.to}`); refreshFivemDbStatus(); }
+    else showToast('❌', (r && r.error) || 'Migration failed');
+  } catch (e) { showToast('❌', e.message); }
+}
+async function migrateFivemDbFromFile() {
+  const s = getActive(); if (!s) return;
+  showToast('📄', 'Choose your .sql dump…');
+  try {
+    const r = await window.nexus.migrateFivemDbFromFile(s.id);
+    if (r && r.ok) { showToast('✅', `Imported into ${r.to}`); refreshFivemDbStatus(); }
+    else if (r && r.error && r.error !== 'canceled') showToast('❌', r.error);
+  } catch (e) { showToast('❌', e.message); }
 }
 async function createCluster() {
   const name = (document.getElementById('clusterName')?.value || '').trim();
