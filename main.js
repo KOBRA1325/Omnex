@@ -1359,11 +1359,13 @@ function syncServerConfig(serverId, server, isInstall = false) {
     }
 
     else if (server.game === 'Ark: Survival Evolved' || server.game === 'Ark: Survival Ascended') {
-      const iniPath = path.join(server.installDir, 'ShooterGame', 'Saved', 'Config', 'WindowsServer', 'GameUserSettings.ini');
+      // Create the ini if ARK hasn't (so name/passwords/cap apply + the editor works).
+      const iniPath = ensureArkConfig(server);
       if (fs.existsSync(iniPath)) {
         let ini = fs.readFileSync(iniPath, 'utf8');
         if (ini.match(/^SessionName=.*$/m)) ini = ini.replace(/^SessionName=.*$/m, `SessionName=${gameName}`);
         else if (ini.includes('[SessionSettings]')) ini = ini.replace(/\[SessionSettings\]/, `[SessionSettings]\nSessionName=${gameName}`);
+        else ini += `\n[SessionSettings]\nSessionName=${gameName}\n`;
         fs.writeFileSync(iniPath, ini);
       }
     }
@@ -1923,6 +1925,17 @@ function stopMariadb() {
     }
   } catch (e) {}
   mariadbProc = null;
+}
+
+// Stop the managed MariaDB once no FiveM server that uses it is still running.
+// Ref-counted so stopping one server never pulls the DB out from another that's up.
+// Only acts on a MariaDB that Omnex itself started (mariadbProc set).
+function maybeStopMariadb(logId) {
+  if (!mariadbProc) return;
+  const stillNeeded = appData.servers.some(s => s.game === 'FiveM' && s.fivemManagedDb && serverProcesses[s.id]);
+  if (stillNeeded) return;
+  if (logId) log(logId, 'dim', 'No FiveM servers still running — stopping the managed MariaDB.');
+  stopMariadb();
 }
 
 function fivemDbName(server) {
@@ -3031,6 +3044,12 @@ ipcMain.handle('read-server-config', (e, id) => {
       } catch(e) {}
     }
 
+    // ARK: generate a seed GameUserSettings.ini if the game hasn't written one yet,
+    // so the config editor is usable instead of stuck on "Config file not found".
+    if (!configPath && (server.game === 'Ark: Survival Ascended' || server.game === 'Ark: Survival Evolved')) {
+      try { const p = ensureArkConfig(server); if (fs.existsSync(p)) configPath = p; } catch (e) {}
+    }
+
     if (!configPath) {
       return { ok: true, type: 'steam', game: server.game, props: {}, defs: def, empty: true,
         error: `Config file not found. Start the server once to generate it.` };
@@ -3174,9 +3193,23 @@ ipcMain.handle('write-steam-config', (e, { id, props, configPath }) => {
         if (key in props) { updated.add(key); return `${key}${eq > -1 ? '=' : ' '}${props[key]}`; }
         return line;
       });
-      // Append any new keys
-      for (const [k, v] of Object.entries(props)) {
-        if (!updated.has(k)) result.push(`${k}=${v}`);
+      // Append any new keys. For ARK, place them in the correct section (most under
+      // [ServerSettings]; SessionName/MaxPlayers in their own) instead of dumping them
+      // at the end of the file, which would land them under the wrong section.
+      const isArk = server.game === 'Ark: Survival Ascended' || server.game === 'Ark: Survival Evolved';
+      const newEntries = Object.entries(props).filter(([k]) => !updated.has(k));
+      if (isArk && newEntries.length) {
+        const sectionFor = (k) => k === 'SessionName' ? '[SessionSettings]'
+          : k === 'MaxPlayers' ? '[/Script/Engine.GameSession]' : '[ServerSettings]';
+        const groups = {};
+        for (const [k, v] of newEntries) (groups[sectionFor(k)] = groups[sectionFor(k)] || []).push(`${k}=${v}`);
+        for (const [sec, entries] of Object.entries(groups)) {
+          const idx = result.findIndex(l => l.trim() === sec);
+          if (idx > -1) result.splice(idx + 1, 0, ...entries);
+          else result.push(sec, ...entries);
+        }
+      } else {
+        for (const [k, v] of newEntries) result.push(`${k}=${v}`);
       }
       fs.writeFileSync(configPath, result.join('\n'));
     }
@@ -6587,6 +6620,9 @@ async function startServerById(id) {
         }
         // Hide the automatic RCON ShowPlayers poll (runs every 20s for player counts)
         if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
+        // Ark: Survival Ascended spews GameAnalytics SDK telemetry to stdout
+        // (Info/Debug/Warning + "Add DESIGN event" dino kills) — hide the flood.
+        if (/GameAnalytics/i.test(l)) return;
         // Hide the Minecraft health/position poll replies (parse them, don't show)
         if (parseMinecraftEntityData(id, l)) return;
         if (/^No entity was found$/i.test(l.replace(/^.*?\]:\s*/, '').trim())) return;
@@ -6601,6 +6637,8 @@ async function startServerById(id) {
           return;
         }
         if (/executed the command\.?\s*ShowPlayers/i.test(l)) return;
+        // Ark: Survival Ascended GameAnalytics SDK telemetry (also hits stderr) — hide it.
+        if (/GameAnalytics/i.test(l)) return;
         // Minecraft/Java often logs to stderr — parse+hide the health/position
         // poll replies here too, and classify by content (not force everything warn).
         if (parseMinecraftEntityData(id, l)) return;
@@ -6658,6 +6696,9 @@ async function startServerById(id) {
       trackPlayers(id, []); // close out any open sessions when the server stops
       emit('players-updated', { serverId: id, players: [] });
       emit('server-stopped', { serverId:id, code });
+      // Managed MariaDB: if this was a FiveM server and no other FiveM server that
+      // uses the managed DB is still running, shut MariaDB down (ref-counted).
+      if (server.game === 'FiveM') { try { maybeStopMariadb(id); } catch (e) {} }
       stopLogTailer(id);
       updateTaskbarBadge();
     });
@@ -6905,6 +6946,38 @@ function rconCommand(host, port, password, command, timeoutMs = 3000) {
 // player counts. Only generates an admin password if the user hasn't set one.
 // Ark: Survival Ascended — ensure RCON is on with a known admin password (used for
 // Activity player polling + graceful SaveWorld). Respects a user-set ServerAdminPassword.
+// Ensure an ARK GameUserSettings.ini exists so the config editor has something to
+// read/write and so server name / passwords / player cap actually apply. ARK is
+// supposed to generate this on first launch, but doesn't always (e.g. force-killed
+// before it flushes), leaving the config editor stuck on "Config file not found".
+// We seed a minimal, correctly-sectioned file; ARK fills in the rest of the defaults
+// on next start. Never overwrites an existing file.
+function ensureArkConfig(server) {
+  const iniPath = path.join(server.installDir, 'ShooterGame', 'Saved', 'Config', 'WindowsServer', 'GameUserSettings.ini');
+  if (fs.existsSync(iniPath)) return iniPath;
+  try {
+    fs.mkdirSync(path.dirname(iniPath), { recursive: true });
+    const name  = String(server.name || 'ARK Server').replace(/[\r\n]/g, ' ');
+    const admin = String(server.rconPassword || '');
+    const maxp  = String(server.maxPlayers || 70);
+    fs.writeFileSync(iniPath, [
+      '[ServerSettings]',
+      `ServerAdminPassword=${admin}`,
+      'ServerPassword=',
+      'RCONEnabled=True',
+      `RCONPort=${server.rconPort || 27020}`,
+      '',
+      '[SessionSettings]',
+      `SessionName=${name}`,
+      '',
+      '[/Script/Engine.GameSession]',
+      `MaxPlayers=${maxp}`,
+      '',
+    ].join('\r\n'));
+  } catch (e) {}
+  return iniPath;
+}
+
 function configureArkRcon(server) {
   const iniPath = path.join(server.installDir, 'ShooterGame', 'Saved', 'Config', 'WindowsServer', 'GameUserSettings.ini');
   let ini = null;
