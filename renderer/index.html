@@ -1216,8 +1216,12 @@
             Your password is used only to authenticate with SteamCMD on your machine. It is never sent anywhere else.
             If you have Steam Guard enabled you will be prompted for the code in the console when first connecting.
           </div>
-          <div style="display:flex; gap:8px">
+          <div style="display:flex; gap:8px; flex-wrap:wrap">
             <button class="btn-modal-save" style="padding:7px 18px; font-size:11px" onclick="saveSteamConnection()">Save & Connect</button>
+            <!-- Mobile-authenticator accounts get a push prompt that expires in seconds.
+                 SteamCMD only reveals it when run in a real console, so offer that route. -->
+            <button class="btn-modal-cancel" style="padding:7px 14px; font-size:11px" onclick="steamPreAuth()"
+              title="Opens SteamCMD in a console window so you can approve the Steam Guard prompt while it is still valid">📱 Approve in Steam window</button>
             <button class="btn-modal-cancel" onclick="closeSteamConnect()">Cancel</button>
           </div>
         </div>

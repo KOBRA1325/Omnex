@@ -1224,13 +1224,21 @@ function installViaSteamCmdAuth(serverId, installDir, appId, gameName, username,
         if (line.trim()) log(serverId, 'dim', line.trim());
       });
     });
-    proc.stderr.on('data', d => log(serverId, 'warn', d.toString().trim()));
     proc.on('close', code => {
       if (code === 0 || code === 7) {
         resolve();
       } else {
-        // Check output for specific Steam Guard issues
-        if (output.includes('Two-factor code mismatch') || output.includes('two-factor')) {
+        // SteamCMD block-buffers stdout when it isn't attached to a console, so a
+        // 'confirm this login on your phone' prompt only reaches us in the flush at
+        // exit — long after SteamCMD gave up waiting. Nothing we can read in time,
+        // so say plainly what happened and point at the visible-window login, which
+        // shows the prompt while it is still live.
+        if (/wait(ing)? for confirmation timed out|timed out waiting for confirmation/i.test(output)) {
+          log(serverId, 'error', '🔐 Steam asked you to approve this login in the Steam Mobile app, but the request expired before it was confirmed.');
+          log(serverId, 'info',  '→ Settings → Connections → Approve in Steam window. Approve the prompt there, then start this install again.');
+          emit('install-needs-auth', { serverId });
+          reject(new Error('Steam Guard confirmation timed out — approve the login in a Steam window (Settings → Connections), then retry'));
+        } else if (output.includes('Two-factor code mismatch') || output.includes('Invalid Login Auth Code')) {
           // Clear the expired guard code
           const existing = loadSteamCreds();
           if (existing.steamGuardCode) {
