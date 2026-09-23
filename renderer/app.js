@@ -181,6 +181,7 @@ const GAMES = [
   { name:'Palworld',        port:'8211',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1623730/capsule_sm_120.jpg', fallback:'🐾' },
   { name:'Enshrouded',      port:'15636', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1203620/capsule_sm_120.jpg', fallback:'🌫️' },
   { name:'Farming Simulator 25', port:'10823', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/2300320/capsule_sm_120.jpg', fallback:'🚜', importOnly:true },
+  { name:'Arma 3',          port:'2302',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/107410/capsule_sm_120.jpg', fallback:'🪖' },
   { name:'FiveM',           port:'30120', icon:'', fallback:'🚗' },
 ];
 
@@ -1740,6 +1741,8 @@ function updateInstallInfo() {
     ? `${g.name} is import-only — install its dedicated server from your own account, then use the Import tab to add it. Omnex can't download it automatically.`
     : g.name === 'FiveM'
     ? `Omnex will download the recommended FXServer build + default resources (no Steam/account needed). You'll need a FREE Cfx.re license key from keymaster.fivem.net — add it in Config, then Start. RP frameworks (QBCore/ESX) are add-ons you install after.`
+    : g.name === 'Arma 3'
+    ? `Omnex will install the Arma 3 dedicated server (Steam app 233780) via SteamCMD. This is the one game that needs a Steam login — Steam refuses anonymous downloads for it, so connect your account in Settings → Connections first.`
     : g.name === 'Terraria'
     ? (selectedTerrariaType === 'tmodloader'
         ? `Omnex will install the tModLoader dedicated server via SteamCMD (free, no Steam account) and configure it. Mods are added after install from the Mods panel.`
@@ -2523,7 +2526,11 @@ async function saveAutoRestartField(field, value) {
 async function addFirewallRule(id) {
   const s = servers.find(sv => sv.id === id);
   if (!s) return;
-  const extraPorts = s.game === 'Palworld' ? [27015] : [];
+  // Arma 3 answers Steam queries on port+1 and reports to the master on port+2,
+  // so a server that's up but invisible in the browser is usually just these.
+  const extraPorts = s.game === 'Palworld' ? [27015]
+    : s.game === 'Arma 3' ? [Number(s.port || 2302) + 1, Number(s.port || 2302) + 2]
+    : [];
   const portList = [s.port, ...extraPorts];
   if (!confirm(`Open port${portList.length>1?'s':''} ${portList.join(', ')} in Windows Firewall for "${s.name}"?\n\nThis creates inbound rules (TCP + UDP). Windows may prompt for admin access.`)) return;
   showToast('🛡️', 'Adding firewall rules...');
@@ -2559,7 +2566,7 @@ async function renderNetworkCard() {
       <button class="btn-firewall" onclick="addFirewallRule('${s.id}')" style="width:100%; margin-top:10px; padding:9px 12px; background:rgba(0,229,255,0.06); border:1px solid rgba(0,229,255,0.35); color:var(--accent); border-radius:6px; cursor:pointer; font-family:'Exo 2',sans-serif; font-size:12px; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.15s">
         <span>🛡️</span> Open Port ${s.port} in Windows Firewall
       </button>
-      <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}.</div>
+      <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}${s.game==='Arma 3'?` + ${Number(s.port||2302)+1}–${Number(s.port||2302)+2} for the Steam server browser`:''}.</div>
       <div class="network-row" style="flex-direction:column; align-items:stretch; gap:6px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px">
         <div class="network-label" style="display:flex; align-items:center; gap:6px">💬 Discord webhook <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
         <div style="display:flex; gap:6px; align-items:center">
@@ -4076,7 +4083,17 @@ function wireEvents(){
     });
   } catch(e) {}
 
-  // Arma 3 uses anonymous login - no auth needed for server install
+  // Arma 3 (app 233780) has no anonymous license — SteamCMD answers "No subscription",
+  // so it installs through the steam_auth path using Settings → Connections. When an
+  // install stops for want of an account, open that form rather than just erroring.
+  try {
+    window.nexus.onInstallNeedsAuth(() => {
+      showToast('🔐', 'This game needs a Steam login — connect your account to continue.');
+      openSettingsModal();
+      try { switchSettingsTab('connections'); } catch(e) {}
+      setTimeout(() => { try { openSteamConnect(); } catch(e) {} }, 150);
+    });
+  } catch(e) {}
 }
 
 // ── Wire titlebar buttons via JS (avoids webkit-app-region drag interference) ──
