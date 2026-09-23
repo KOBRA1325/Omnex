@@ -3861,10 +3861,16 @@ async function saveSteamConnection(){
       loadSteamConnectionStatus();
       showToast('✅', `Steam connected! Future installs won\'t need codes.`);
     } else if (result.needsCode) {
-      // Email was sent - keep form open, wait for user to enter code
+      // Keep the form open for the code. Where that code comes from depends on
+      // the account: the authenticator app for mobile Steam Guard, an emailed
+      // message otherwise — main.js works out which and says so.
       buttons.forEach(b => b.disabled = false);
-      if (status) { status.textContent = 'Check your email for Steam code'; status.style.color = 'var(--yellow)'; }
-      showToast('📧', 'Check your email and enter the 5-character code here, click Save again');
+      const where = result.mobile ? 'Steam Guard app' : 'email';
+      const msg = result.expired
+        ? 'Code rejected — enter a fresh one'
+        : 'Enter the code from your ' + where;
+      if (status) { status.textContent = msg; status.style.color = 'var(--yellow)'; }
+      showToast(result.mobile ? '📱' : '📧', result.error || msg);
       const guardField = document.getElementById('settingsSteamGuard');
       if (guardField) { guardField.focus(); }
     } else {

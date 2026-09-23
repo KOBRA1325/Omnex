@@ -6203,13 +6203,44 @@ ipcMain.handle('steamcmd-auth', async (e, { username, password, steamGuardCode }
       try { fs.unlinkSync(scriptPath); } catch(e) {}
       const lower = output.toLowerCase();
 
-      // Check for ERRORS FIRST - SteamCMD includes "Steam Public" in error messages too!
-      if (lower.includes('two-factor code mismatch') || lower.includes('two-factor') ||
-          lower.includes('account logon denied') || lower.includes('check your email')) {
-        emit('console-line', { serverId: 'settings', type: 'warn', text: '📧 SteamCMD email code needed - check inbox' });
-        resolve({ ok: false, needsCode: true, error: 'Steam Guard code required from email' });
+      // Success is unambiguous — "Logged in OK" is only ever printed on a real
+      // login — so it is checked FIRST. This used to run after the Steam Guard
+      // checks below, and because one of those was a bare `includes('two-factor')`
+      // substring match, a session that merely *mentioned* two-factor anywhere in
+      // its output was reported as a failure even though the login had succeeded.
+      if (lower.includes('logged in ok') || lower.includes('waiting for user info...ok')) {
+        emit('console-line', { serverId: 'settings', type: 'success', text: '✔ SteamCMD authenticated. Future installs will not need codes.' });
+        resolve({ ok: true });
         return;
       }
+
+      // A code was supplied but Steam rejected it — almost always a mobile
+      // authenticator code that rotated before the login landed. Say so, rather
+      // than sending the user to look for an email that was never sent.
+      if (lower.includes('two-factor code mismatch') || lower.includes('invalid steam guard code')) {
+        emit('console-line', { serverId: 'settings', type: 'warn', text: '🔐 That Steam Guard code was rejected — codes expire quickly, try a fresh one' });
+        resolve({ ok: false, needsCode: true, mobile: true, expired: true,
+                  error: 'That code was rejected (they expire after ~30s) — enter a fresh one', output: output.slice(-500) });
+        return;
+      }
+
+      // Steam Guard is required. Which kind matters: an emailed code has to be
+      // fetched from an inbox, a mobile code comes from the authenticator app.
+      // Telling a mobile-authenticator user to "check your email" sends them to
+      // an inbox that will never receive anything.
+      const emailGuard  = lower.includes('check your email') || lower.includes('account logon denied');
+      const mobileGuard = lower.includes('two-factor');
+      if (emailGuard || mobileGuard) {
+        // "Account Logon Denied" is specifically the emailed-code path, so it wins
+        // when both appear.
+        const mobile = mobileGuard && !emailGuard;
+        const where  = mobile ? 'Steam Mobile Authenticator app' : 'email';
+        emit('console-line', { serverId: 'settings', type: 'warn', text: `🔐 Steam Guard code needed — check your ${where}` });
+        resolve({ ok: false, needsCode: true, mobile,
+                  error: `Steam Guard code required from your ${where}`, output: output.slice(-500) });
+        return;
+      }
+
       if (lower.includes('invalid password')) {
         resolve({ ok: false, error: 'Invalid password' });
         return;
@@ -6224,14 +6255,6 @@ ipcMain.handle('steamcmd-auth', async (e, { username, password, steamGuardCode }
       }
       if (lower.includes('failed')) {
         resolve({ ok: false, error: 'Authentication failed', output: output.slice(-500) });
-        return;
-      }
-
-      // Only THEN check for success - using strict markers
-      // "Logged in OK" or "Waiting for user info...OK" indicate actual successful login
-      if (lower.includes('logged in ok') || lower.includes('waiting for user info...ok')) {
-        emit('console-line', { serverId: 'settings', type: 'success', text: '✔ SteamCMD authenticated. Future installs will not need codes.' });
-        resolve({ ok: true });
         return;
       }
 
