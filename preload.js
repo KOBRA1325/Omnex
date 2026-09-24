@@ -109,6 +109,8 @@ contextBridge.exposeInMainWorld('nexus', {
   saveArma3Config:     (sid,cfg)    => ipcRenderer.invoke('save-arma3-config', {serverId:sid, config:cfg}),
   loadArma3Config:     (sid)        => ipcRenderer.invoke('load-arma3-config', {serverId:sid}),
   getAntistasiMods:    ()                           => ipcRenderer.invoke('get-antistasi-mods'),
+  listArma3Missions:   (sid)                        => ipcRenderer.invoke('list-arma3-missions', {serverId:sid}),
+  setArma3Mission:     (sid, template, difficulty)  => ipcRenderer.invoke('set-arma3-mission', {serverId:sid, template, difficulty}),
   installArma3Mods:    (opts)                       => ipcRenderer.invoke('install-arma3-mods', opts),
   getArma3Mods:        (serverId)                   => ipcRenderer.invoke('get-arma3-mods', serverId),
 

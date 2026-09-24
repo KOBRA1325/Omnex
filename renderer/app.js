@@ -2271,7 +2271,10 @@ async function renderConfigCard() {
     Config editing not yet supported for ${s.game}.<br>Edit files directly in:<br>
     <span style="color:var(--accent);font-family:monospace;font-size:10px;word-break:break-all">${s.installDir||'Not installed'}</span>
   </div>`;
-  if (s.game === 'Arma 3') fallback += await renderArma3ModSection(s);
+  if (s.game === 'Arma 3') {
+    fallback += await renderArma3MissionSection(s);
+    fallback += await renderArma3ModSection(s);
+  }
   card.innerHTML = fallback + arHtml;
 }
 
@@ -2452,6 +2455,55 @@ async function saveSteamConfig(configPath) {
   try { const r=await window.nexus.writeSteamConfig(s.id,window._steamConfigProps,configPath); showToast(r.ok?'💾':'❌',r.ok?'Config saved!':r.error||'Save failed'); }
   catch(e){showToast('❌',e.message);}
 }
+// ── Arma 3 mission picker ─────────────────────────────────────────────────────
+// A modded Arma server still idles until a mission is selected, so this sits
+// directly above the mod list in the Config panel.
+let _armaMissions = [];
+async function renderArma3MissionSection(s) {
+  try {
+    const r = await window.nexus.listArma3Missions(s.id);
+    if (!r || !r.ok) return '';
+    _armaMissions = r.missions || [];
+    let html = `<div class="config-group" style="margin-top:12px"><div class="config-group-label">🗺 Mission</div>`;
+    if (!_armaMissions.length) {
+      html += `<div class="empty-msg-sm" style="margin-bottom:8px">No missions found yet. Install the Antistasi modpack below, or drop a <b>.pbo</b> into <span style="font-family:monospace">mpmissions/</span>.</div>`;
+      return html + '</div>';
+    }
+    const opts = _armaMissions.map(m =>
+      `<option value="${escapeHtml(m.template)}" ${m.template === r.current ? 'selected' : ''}>${escapeHtml(m.template)}${m.source !== 'server' ? ' — from ' + escapeHtml(m.source) : ''}</option>`
+    ).join('');
+    const diffs = ['Recruit', 'Regular', 'Veteran', 'Custom'].map(d =>
+      `<option value="${d}" ${d === (r.difficulty || 'Regular') ? 'selected' : ''}>${d}</option>`
+    ).join('');
+    html += `<div class="config-row"><div class="config-label">Mission</div>
+      <select class="config-input" id="armaMissionSelect">${opts}</select></div>`;
+    html += `<div class="config-row"><div class="config-label">Difficulty</div>
+      <select class="config-input" id="armaDifficultySelect">${diffs}</select></div>`;
+    html += `<div class="config-row" style="justify-content:flex-start;gap:8px">
+      <button class="btn-save-config" style="margin:0" onclick="saveArma3Mission('${s.id}')">💾 Apply Mission</button></div>`;
+    html += r.current
+      ? `<div class="form-hint" style="margin-top:6px">Running <b>${escapeHtml(r.current)}</b>. Restart the server after changing this.</div>`
+      : `<div class="form-hint" style="margin-top:6px;color:var(--yellow)">No mission set yet — the server will start and then sit idle until you apply one.</div>`;
+    return html + '</div>';
+  } catch (e) { return ''; }
+}
+
+async function saveArma3Mission(serverId) {
+  const template = document.getElementById('armaMissionSelect')?.value;
+  const difficulty = document.getElementById('armaDifficultySelect')?.value || 'Regular';
+  if (!template) { showToast('⚠️', 'Pick a mission first'); return; }
+  showToast('🗺', 'Applying mission...');
+  try {
+    const r = await window.nexus.setArma3Mission(serverId, template, difficulty);
+    if (r && r.ok) {
+      showToast('✅', `Mission set: ${template}. Restart the server to load it.`);
+      renderConfigCard();
+    } else {
+      showToast('❌', (r && r.error) || 'Could not set the mission');
+    }
+  } catch (e) { showToast('❌', e.message); }
+}
+
 async function renderArma3ModSection(s) {
   try {
     const mods = await window.nexus.getArma3Mods(s.id);

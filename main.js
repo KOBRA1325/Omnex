@@ -5806,6 +5806,133 @@ ipcMain.handle('save-steam-guard-code', (e, code) => {
 });
 ipcMain.handle('get-antistasi-mods', () => ANTISTASI_ULTIMATE_MODS);
 
+// ── Arma 3 mission selection ─────────────────────────────────────────────────
+// A dedicated server only auto-starts a mission that is (a) present in its own
+// mpmissions/ folder and (b) named by a `class Missions` entry in server.cfg.
+// Without both, the server boots, registers with Steam and then just idles —
+// which is exactly what a freshly installed Arma 3 server does.
+
+// Find every mission we could offer: the server's own mpmissions/, plus any
+// bundled inside installed mods (Antistasi ships its missions in the mod).
+function listArmaMissions(server) {
+  const missions = [];
+  const seen = new Set();
+  const addFrom = (dir, source) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const entry of entries) {
+      let template = null;
+      if (entry.isFile() && entry.name.toLowerCase().endsWith('.pbo')) {
+        template = entry.name.slice(0, -4);
+      } else if (entry.isDirectory() && entry.name.includes('.') &&
+                 fs.existsSync(path.join(dir, entry.name, 'mission.sqm'))) {
+        // Unpacked mission: a Mission.Map folder containing mission.sqm.
+        template = entry.name;
+      }
+      if (!template || seen.has(template)) continue;
+      seen.add(template);
+      missions.push({ template, source, file: entry.name, path: path.join(dir, entry.name) });
+    }
+  };
+
+  addFrom(path.join(server.installDir, 'mpmissions'), 'server');
+  const modsDir = path.join(server.installDir, 'mods');
+  let modDirs = [];
+  try {
+    modDirs = fs.readdirSync(modsDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+  } catch (e) {}
+  for (const m of modDirs) {
+    addFrom(path.join(modsDir, m, 'mpmissions'), m);
+    addFrom(path.join(modsDir, m, 'MPMissions'), m);
+  }
+  return missions;
+}
+
+// Replace (or add) the top-level `class Missions` block. patchArmaCfg deliberately
+// never touches class bodies, so the mission block gets its own writer that
+// brace-matches the existing block rather than regex-guessing where it ends.
+function setArmaMissionBlock(raw, template, difficulty) {
+  const safe = (v) => String(v).replace(/"/g, '');
+  const block = [
+    'class Missions {',
+    '    class omnex {',
+    '        template = "' + safe(template) + '";',
+    '        difficulty = "' + safe(difficulty || 'Regular') + '";',
+    '    };',
+    '};',
+  ];
+
+  const lines = String(raw).split(/\r?\n/);
+  let depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('//') || line.startsWith('#')) continue;
+    if (depth === 0 && /^class\s+Missions\b/i.test(line)) {
+      let d = 0, started = false, j = i;
+      for (; j < lines.length; j++) {
+        for (const ch of lines[j]) {
+          if (ch === '{') { d++; started = true; }
+          else if (ch === '}') d--;
+        }
+        if (started && d <= 0) break;
+      }
+      return [...lines.slice(0, i), ...block, ...lines.slice(Math.min(j + 1, lines.length))].join('\n');
+    }
+    depth = armaCfgDepth(line, depth);
+  }
+  return String(raw).replace(/\s*$/, '') + '\n\n' + block.join('\n') + '\n';
+}
+
+ipcMain.handle('list-arma3-missions', (e, { serverId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  return {
+    ok: true,
+    missions: listArmaMissions(server),
+    current: server.armaMission || '',
+    difficulty: server.armaDifficulty || 'Regular',
+  };
+});
+
+ipcMain.handle('set-arma3-mission', (e, { serverId, template, difficulty }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+
+  const chosen = listArmaMissions(server).find(m => m.template === template);
+  if (!chosen) return { ok: false, error: 'Mission not found — reinstall the mods or drop a .pbo in mpmissions' };
+
+  // Arma only auto-starts missions from the server's own mpmissions/, so a
+  // mission that lives inside a mod has to be copied across first.
+  const mpDir = path.join(server.installDir, 'mpmissions');
+  try { fs.mkdirSync(mpDir, { recursive: true }); } catch (e) {}
+  if (chosen.source !== 'server') {
+    const dest = path.join(mpDir, chosen.file);
+    try {
+      if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
+      fs.cpSync(chosen.path, dest, { recursive: true });
+      log(serverId, 'info', `Copied ${chosen.file} from ${chosen.source} into mpmissions/`);
+    } catch (err) {
+      return { ok: false, error: 'Could not copy the mission: ' + err.message };
+    }
+  }
+
+  const cfgPath = path.join(server.installDir, 'server.cfg');
+  if (!fs.existsSync(cfgPath)) { try { syncServerConfig(serverId, server, false); } catch (e) {} }
+  let raw = '';
+  try { raw = fs.readFileSync(cfgPath, 'utf8'); } catch (e) { return { ok: false, error: 'server.cfg not found' }; }
+  try {
+    fs.writeFileSync(cfgPath, setArmaMissionBlock(raw, template, difficulty));
+  } catch (err) {
+    return { ok: false, error: 'Could not write server.cfg: ' + err.message };
+  }
+
+  server.armaMission = template;
+  server.armaDifficulty = difficulty || 'Regular';
+  saveData();
+  log(serverId, 'success', `✔ Mission set: ${template} (${server.armaDifficulty}). Restart the server to load it.`);
+  return { ok: true, template, difficulty: server.armaDifficulty };
+});
+
 // ── Parse Arma 3 Launcher HTML preset file ────────────────────────────────────
 ipcMain.handle('parse-arma3-preset', async (e, htmlContent) => {
   try {
