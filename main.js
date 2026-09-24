@@ -329,7 +329,14 @@ const GAME_DEFS = {
   // exe; altExe covers older/32-bit-only installs on import. -world=empty skips loading
   // a terrain at boot — the mission's own world loads when a mission starts.
   'Arma 3':          { type:'steam_auth', serverAppId:'233780', startExe:'arma3server_x64.exe', altExe:'arma3server.exe',
-    startArgs:(d,s)=>['-port='+(s.port||2302),'-config=server.cfg','-profiles=profiles','-name=omnex','-world=empty'] },
+    startArgs:(d,s)=>{
+      const args = ['-port='+(s.port||2302),'-config=server.cfg','-profiles=profiles','-name=omnex','-world=empty'];
+      // Server-side mods only. Client-side mods are installed for their keys
+      // (see installArmaModKeys) but must NOT be loaded headlessly.
+      const mods = (s.armaMods || []).filter(Boolean);
+      if (mods.length) args.push('-mod=' + mods.map(m => 'mods\\' + m).join(';'));
+      return args;
+    } },
   'FiveM':           { type:'fivem', startExe:'FXServer.exe', startArgs:(d,s)=>['+exec','server.cfg'] },
   // Farming Simulator 25 — import-only (Giants gates the download behind a separate
   // license; can't be fetched by SteamCMD). Managed via its web admin panel (:8080).
@@ -5697,19 +5704,68 @@ ipcMain.handle('detect-server', async (e, dir) => {
 const STEAM_CREDS_FILE = path.join(USER_DATA, 'steam_creds.json');
 const ARMA_MODS_DIR    = (installDir) => path.join(installDir, 'mods');
 
-// Known Antistasi Ultimate mod IDs + their common dependencies
+// Antistasi Ultimate modpack. Every id below was resolved from the Steam Workshop
+// and checked against ISteamRemoteStorage/GetPublishedFileDetails — the previous
+// hand-written list had four ids pointing at entirely different mods (and one that
+// did not exist), so these are verified by title, not by memory.
+//
+// `side` decides how a mod is used:
+//   'server' — loaded by the server via -mod=. Content the mission itself needs:
+//              without it the server cannot spawn the units/vehicles it references.
+//   'client' — NOT loaded by the server. Purely visual/audio/UI mods that only run
+//              on the player's machine. The server still installs their .bikey into
+//              keys/ so that verifySignatures lets those clients connect.
 const ANTISTASI_ULTIMATE_MODS = [
-  { id: '3020755032', name: 'Antistasi Ultimate',          required: true  },
-  { id: '450814997',  name: 'CBA_A3',                      required: true  },
-  { id: '463939057',  name: 'ACE3',                        required: true  },
-  { id: '583496184',  name: 'RHS AFRF',                    required: false },
-  { id: '541888371',  name: 'RHS USAF',                    required: false },
-  { id: '843425103',  name: '3den Enhanced',               required: false },
-  { id: '2018593667', name: 'CUP Terrains Core',           required: false },
-  { id: '583544987',  name: 'CUP Terrains Maps',           required: false },
-  { id: '497661914',  name: 'CUP Units',                   required: false },
-  { id: '541888371',  name: 'RHS Escalation',              required: false },
+  // Required by the Antistasi Ultimate workshop page itself.
+  { id: '3020755032', name: 'Antistasi Ultimate - Mod',            side: 'server', required: true  },
+  { id: '450814997',  name: 'CBA_A3',                              side: 'server', required: true  },
+  // Content mods — the mission spawns from these, so the server needs them loaded.
+  { id: '463939057',  name: 'ace',                                 side: 'server', required: false },
+  { id: '843425103',  name: 'RHSAFRF',                             side: 'server', required: false },
+  { id: '843577117',  name: 'RHSUSAF',                             side: 'server', required: false },
+  { id: '843632231',  name: 'RHSSAF',                              side: 'server', required: false },
+  // Client-side only — keys are installed, the server does not load them.
+  { id: '903134884',  name: 'Align',                               side: 'client', required: false },
+  { id: '2791403093', name: 'Better Inventory',                    side: 'client', required: false },
+  { id: '2257686620', name: 'Blastcore Murr Edition',              side: 'client', required: false },
+  { id: '837729515',  name: 'CH View Distance',                    side: 'client', required: false },
+  { id: '1334412770', name: 'Dual Arms - Two Primary Weapons',     side: 'client', required: false },
+  { id: '825179978',  name: 'Enhanced Soundscape',                 side: 'client', required: false },
+  { id: '825172265',  name: 'Immerse',                             side: 'client', required: false },
+  { id: '2582780947', name: 'Integrated AI Voice Control System',  side: 'client', required: false },
+  { id: '825174634',  name: 'Suppress',                            side: 'client', required: false },
 ];
+
+// Which side a mod loads on. Trust our own table over whatever the renderer sends,
+// and treat an unknown mod (e.g. one imported from a launcher preset) as server-side,
+// since a missing content mod breaks the mission while a surplus one only costs RAM.
+const ARMA_MOD_SIDES = new Map(ANTISTASI_ULTIMATE_MODS.map(m => [m.id, m.side]));
+function armaModSide(mod) {
+  return mod.side || ARMA_MOD_SIDES.get(String(mod.id)) || 'server';
+}
+
+// Arma refuses clients whose mods aren't signed by a key the server holds (see
+// verifySignatures in server.cfg), so every mod's .bikey has to land in keys/ —
+// including client-only mods the server never loads. Without this, a fully modded
+// server rejects the very players it was built for.
+function installArmaModKeys(modDir, keysDir) {
+  let copied = 0;
+  const walk = (dir, depth) => {
+    if (depth > 3) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (entry.name.toLowerCase().endsWith('.bikey')) {
+        try { fs.copyFileSync(full, path.join(keysDir, entry.name)); copied++; } catch (e) {}
+      }
+    }
+  };
+  try { fs.mkdirSync(keysDir, { recursive: true }); } catch (e) {}
+  walk(modDir, 0);
+  return copied;
+}
 
 // Save/load Steam credentials (stored locally, never transmitted)
 function loadSteamCreds() {
@@ -6062,6 +6118,9 @@ ipcMain.handle('install-arma3-mods', async (e, { serverId, mods, username, passw
   const modsDir = path.join(server.installDir, 'mods');
   fs.mkdirSync(modsDir, { recursive: true });
 
+  const keysDir = path.join(server.installDir, 'keys');
+  let keysCopied = 0;
+
   for (const mod of mods) {
     const result = await downloadOneMod(mod);
     if (result.ok) {
@@ -6069,11 +6128,20 @@ ipcMain.handle('install-arma3-mods', async (e, { serverId, mods, username, passw
       const workshopPath = path.join(STEAMCMD_DIR, 'steamapps', 'workshop', 'content', '107410', mod.id);
       const modDestName = `@${mod.name.replace(/[^a-zA-Z0-9_]/g, '_')}`;
       const modDest = path.join(modsDir, modDestName);
+      const side = armaModSide(mod);
       if (fs.existsSync(workshopPath)) {
         try {
-          if (!fs.existsSync(modDest)) fs.cpSync(workshopPath, modDest, { recursive: true });
-          modFolders.push(modDestName);
-          results.push({ ...mod, ok: true, path: modDest, folderName: modDestName });
+          // Replace rather than skip: this handler is also how a mod gets UPDATED,
+          // and the old code left an existing folder untouched, so an update
+          // silently kept shipping the previous build to players.
+          if (fs.existsSync(modDest)) fs.rmSync(modDest, { recursive: true, force: true });
+          fs.cpSync(workshopPath, modDest, { recursive: true });
+          // Keys go in for every mod, client-only ones included.
+          const n = installArmaModKeys(modDest, keysDir);
+          keysCopied += n;
+          if (side === 'server') modFolders.push(modDestName);
+          results.push({ ...mod, ok: true, side, keys: n, path: modDest, folderName: modDestName });
+          log(serverId, 'success', `✔ ${mod.name} — ${side === 'server' ? 'server-side' : 'client-side (keys only)'}${n ? `, ${n} key${n !== 1 ? 's' : ''}` : ', no signature key found'}`);
         } catch(err) {
           results.push({ ...mod, ok: false, error: err.message });
           log(serverId, 'error', `✗ Failed to copy ${mod.name}: ${err.message}`);
@@ -6089,12 +6157,20 @@ ipcMain.handle('install-arma3-mods', async (e, { serverId, mods, username, passw
     await new Promise(r => setTimeout(r, 1500));
   }
 
-  if (modFolders.length > 0) {
-    const modParam = modFolders.map(f => `mods\\\\${f}`).join(';');
-    server.arma3Mods = results.filter(r => r.ok);
-    server.args = `-config=server.cfg -port=${server.port} "-mod=${modParam}"`;
+  const installed = results.filter(r => r.ok);
+  if (installed.length > 0) {
+    server.arma3Mods = installed;
+    // Store the folder list, NOT a baked args string. The old code wrote a whole
+    // server.args line here, which permanently overrode GAME_DEFS.startArgs — so
+    // changing the port afterwards silently stopped taking effect. startArgs now
+    // builds -mod= from this at launch instead.
+    server.armaMods = modFolders;
+    delete server.args;
     saveData();
-    log(serverId, 'success', `✔ Launch args updated with ${modFolders.length} mod${modFolders.length!==1?'s':''}`);
+    const clientOnly = installed.length - modFolders.length;
+    log(serverId, 'success', `✔ ${modFolders.length} mod${modFolders.length !== 1 ? 's' : ''} will load server-side${clientOnly ? `, ${clientOnly} client-side` : ''}.`);
+    log(serverId, 'info', `🔑 ${keysCopied} signature key${keysCopied !== 1 ? 's' : ''} installed to keys/ — players running these mods can now connect.`);
+    if (!keysCopied) log(serverId, 'warn', '⚠ No .bikey files found. With verifySignatures=2 clients will be rejected; lower it in Config or reinstall the mods.');
   }
 
   const failedCount = results.filter(r => !r.ok).length;

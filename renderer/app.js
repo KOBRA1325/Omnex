@@ -2271,7 +2271,7 @@ async function renderConfigCard() {
     Config editing not yet supported for ${s.game}.<br>Edit files directly in:<br>
     <span style="color:var(--accent);font-family:monospace;font-size:10px;word-break:break-all">${s.installDir||'Not installed'}</span>
   </div>`;
-  if (false) fallback += await renderArma3ModSection(s);
+  if (s.game === 'Arma 3') fallback += await renderArma3ModSection(s);
   card.innerHTML = fallback + arHtml;
 }
 
