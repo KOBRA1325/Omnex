@@ -6123,6 +6123,15 @@ ipcMain.handle('install-arma3-mods', async (e, { serverId, mods, username, passw
   const server = appData.servers.find(s => s.id === serverId);
   if (!server) return { ok: false, error: 'Server not found' };
 
+  // Fall back to the account connected in Settings, so the Workshop dialog
+  // does not make the user re-enter credentials Omnex already holds.
+  if (!username || !password) {
+    const saved = loadSteamCreds();
+    username = username || saved.username || '';
+    password = password || saved.password || '';
+  }
+  if (!username) return { ok: false, error: 'No Steam account. Connect one in Settings → Connections.' };
+
   await ensureSteamCmd(serverId);
 
   const sessionFile = path.join(STEAMCMD_DIR, 'config', 'config.vdf');

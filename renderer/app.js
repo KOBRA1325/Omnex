@@ -2257,7 +2257,13 @@ async function renderConfigCard() {
   const card = document.getElementById('configCard'); if(!card) return;
   const s = getActive();
   if (!s) { card.innerHTML='<div class="empty-msg-sm">Select a server to configure.</div>'; return; }
-  const arHtml = await renderAutoRestartSection();
+  // Arma 3 gets a mission picker + Workshop mod manager. These ride along with
+  // the auto-restart block because that is the one chunk every branch below
+  // renders — the fallback branch alone is never reached now that Arma 3 has a
+  // config schema of its own.
+  const arHtml = ((s.game === 'Arma 3')
+    ? (await renderArma3MissionSection(s)) + (await renderArma3ModSection(s))
+    : '') + (await renderAutoRestartSection());
   try {
     const result = await window.nexus.readServerConfig(s.id);
     if (result.ok && result.type === 'minecraft') {
@@ -2271,10 +2277,6 @@ async function renderConfigCard() {
     Config editing not yet supported for ${s.game}.<br>Edit files directly in:<br>
     <span style="color:var(--accent);font-family:monospace;font-size:10px;word-break:break-all">${s.installDir||'Not installed'}</span>
   </div>`;
-  if (s.game === 'Arma 3') {
-    fallback += await renderArma3MissionSection(s);
-    fallback += await renderArma3ModSection(s);
-  }
   card.innerHTML = fallback + arHtml;
 }
 
@@ -3592,7 +3594,9 @@ async function downloadSelectedMods(){
   if(!workshopSelectedMods.length){showToast('⚠️','No mods selected');return;}
   const username=document.getElementById('steamUsername')?.value.trim();
   const password=document.getElementById('steamPassword')?.value.trim();
-  if(!username||!password){showToast('⚠️','Enter Steam username and password');return;}
+  if(!username){showToast('⚠️','Enter your Steam username');return;}
+  // A blank password is fine: main.js falls back to the account saved under
+  // Settings → Connections rather than making the user type it twice.
   await window.nexus.saveSteamUsername(username);
   const btn=document.getElementById('btnDownloadMods'); if(btn){btn.disabled=true;btn.textContent='⏳ Downloading...';}
   closeWorkshopModal();
