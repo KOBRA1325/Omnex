@@ -5724,6 +5724,8 @@ const ANTISTASI_ULTIMATE_MODS = [
   { id: '843425103',  name: 'RHSAFRF',                             side: 'server', required: false },
   { id: '843577117',  name: 'RHSUSAF',                             side: 'server', required: false },
   { id: '843632231',  name: 'RHSSAF',                              side: 'server', required: false },
+  // AI behaviour: the server simulates the AI, so this has to load there.
+  { id: '2011658088', name: 'AI avoids prone',                    side: 'server', required: false },
   // Client-side only — keys are installed, the server does not load them.
   { id: '903134884',  name: 'Align',                               side: 'client', required: false },
   { id: '2791403093', name: 'Better Inventory',                    side: 'client', required: false },
