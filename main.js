@@ -5808,6 +5808,127 @@ ipcMain.handle('save-steam-guard-code', (e, code) => {
 });
 ipcMain.handle('get-antistasi-mods', () => ANTISTASI_ULTIMATE_MODS);
 
+// ── Arma 3 signature key audit ───────────────────────────────────────────────
+// With verifySignatures on, a mod whose .bikey never reached keys/ rejects every
+// player running it — and the only symptom is a refusal at the join screen, long
+// after the install log has scrolled away. This compares what each installed mod
+// ships against what is actually in keys/, so the gap is visible beforehand.
+
+// Every .bikey filename inside a mod folder.
+function armaModKeyNames(modDir) {
+  const names = [];
+  const walk = (dir, depth) => {
+    if (depth > 3) return;
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (entry.name.toLowerCase().endsWith('.bikey')) names.push(entry.name);
+    }
+  };
+  walk(modDir, 0);
+  return names;
+}
+
+function auditArmaKeys(server) {
+  const installDir = server.installDir;
+  const keysDir = path.join(installDir, 'keys');
+  const present = new Set();
+  try {
+    for (const f of fs.readdirSync(keysDir)) {
+      if (f.toLowerCase().endsWith('.bikey')) present.add(f.toLowerCase());
+    }
+  } catch (e) {}
+
+  const modsDir = path.join(installDir, 'mods');
+  let folders = [];
+  try {
+    folders = fs.readdirSync(modsDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+  } catch (e) {}
+
+  const recorded = server.arma3Mods || [];
+  const rows = [];
+  const seenFolders = new Set();
+
+  for (const folder of folders) {
+    seenFolders.add(folder);
+    const keys = armaModKeyNames(path.join(modsDir, folder));
+    const missing = keys.filter(k => !present.has(k.toLowerCase()));
+    const rec = recorded.find(m => m.folderName === folder);
+    rows.push({
+      folder,
+      name: (rec && rec.name) || folder.replace(/^@/, '').replace(/_+/g, ' ').trim(),
+      side: (rec && rec.side) || 'server',
+      keyCount: keys.length,
+      missing,
+      // unsigned: the mod ships no key at all, so no amount of copying helps —
+      // the only fixes are dropping the mod or lowering verifySignatures.
+      status: keys.length === 0 ? 'unsigned' : (missing.length ? 'missing' : 'ok'),
+    });
+  }
+
+  // Mods in the pack that were selected but never landed on disk.
+  for (const rec of recorded) {
+    if (rec.folderName && !seenFolders.has(rec.folderName)) {
+      rows.push({ folder: rec.folderName, name: rec.name, side: rec.side || 'server',
+                  keyCount: 0, missing: [], status: 'notinstalled' });
+    }
+  }
+
+  rows.sort((a, b) => {
+    const rank = { unsigned: 0, missing: 1, notinstalled: 2, ok: 3 };
+    return (rank[a.status] - rank[b.status]) || a.name.localeCompare(b.name);
+  });
+
+  return {
+    rows,
+    keysPresent: present.size,
+    problems: rows.filter(r => r.status !== 'ok').length,
+    verifySignatures: readArmaVerifySignatures(server),
+  };
+}
+
+// Read verifySignatures straight from server.cfg — whether a missing key actually
+// blocks anyone depends entirely on it.
+function readArmaVerifySignatures(server) {
+  try {
+    const raw = fs.readFileSync(path.join(server.installDir, 'server.cfg'), 'utf8');
+    const v = parseArmaCfg(raw).verifySignatures;
+    return v === undefined ? null : String(v);
+  } catch (e) { return null; }
+}
+
+ipcMain.handle('audit-arma3-keys', (e, { serverId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  return { ok: true, ...auditArmaKeys(server) };
+});
+
+// Re-copy keys from the mods already on disk. Cheap — no re-download — and it is
+// the fix whenever a key simply failed to make it across.
+ipcMain.handle('resync-arma3-keys', (e, { serverId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const keysDir = path.join(server.installDir, 'keys');
+  const modsDir = path.join(server.installDir, 'mods');
+  let copied = 0, scanned = 0;
+  let folders = [];
+  try {
+    folders = fs.readdirSync(modsDir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
+  } catch (e) { return { ok: false, error: 'No mods folder — install the modpack first' }; }
+  for (const folder of folders) {
+    scanned++;
+    copied += installArmaModKeys(path.join(modsDir, folder), keysDir);
+  }
+  log(serverId, 'success', `🔑 Re-synced keys from ${scanned} mod folder${scanned !== 1 ? 's' : ''} — ${copied} key file${copied !== 1 ? 's' : ''} in keys/.`);
+  const audit = auditArmaKeys(server);
+  if (audit.problems) {
+    log(serverId, 'warn', `⚠ ${audit.problems} mod${audit.problems !== 1 ? 's' : ''} still without a usable key. Unsigned mods cannot be fixed by copying — drop them or lower Verify Signatures.`);
+  }
+  return { ok: true, copied, scanned, ...audit };
+});
+
 // ── Arma 3 mission selection ─────────────────────────────────────────────────
 // A dedicated server only auto-starts a mission that is (a) present in its own
 // mpmissions/ folder and (b) named by a `class Missions` entry in server.cfg.

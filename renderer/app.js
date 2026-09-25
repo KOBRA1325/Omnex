@@ -2262,7 +2262,7 @@ async function renderConfigCard() {
   // renders — the fallback branch alone is never reached now that Arma 3 has a
   // config schema of its own.
   const arHtml = ((s.game === 'Arma 3')
-    ? (await renderArma3MissionSection(s)) + (await renderArma3ModSection(s))
+    ? (await renderArma3MissionSection(s)) + (await renderArma3KeySection(s)) + (await renderArma3ModSection(s))
     : '') + (await renderAutoRestartSection());
   try {
     const result = await window.nexus.readServerConfig(s.id);
@@ -2457,6 +2457,66 @@ async function saveSteamConfig(configPath) {
   try { const r=await window.nexus.writeSteamConfig(s.id,window._steamConfigProps,configPath); showToast(r.ok?'💾':'❌',r.ok?'Config saved!':r.error||'Save failed'); }
   catch(e){showToast('❌',e.message);}
 }
+// ── Arma 3 signature keys ─────────────────────────────────────────────────────
+// A missing key only shows up as a player being refused at the join screen, so
+// surface the mismatch here instead.
+async function renderArma3KeySection(s) {
+  try {
+    const r = await window.nexus.auditArma3Keys(s.id);
+    if (!r || !r.ok) return '';
+    const rows = r.rows || [];
+    if (!rows.length) return '';
+    const bad = rows.filter(x => x.status !== 'ok');
+    const verify = r.verifySignatures;
+    const enforcing = verify === null || verify === '2' || verify === '1';
+
+    let html = `<div class="config-group" style="margin-top:12px"><div class="config-group-label">🔑 Signature Keys</div>`;
+    if (!bad.length) {
+      html += `<div class="form-hint" style="color:var(--green)">All ${rows.length} installed mod${rows.length !== 1 ? 's' : ''} have their keys in <span style="font-family:monospace">keys/</span> (${r.keysPresent} key files). Players running this pack can connect.</div>`;
+    } else {
+      const label = { unsigned: 'ships no key', missing: 'key not in keys/', notinstalled: 'not installed' };
+      const colour = { unsigned: 'var(--yellow)', missing: 'var(--red, #ff6b6b)', notinstalled: 'var(--text-dim)' };
+      html += `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">`;
+      for (const x of bad) {
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <span style="color:${colour[x.status] || 'var(--text-dim)'};font-size:12px">●</span>
+          <div style="flex:1">
+            <div style="font-family:'Rajdhani',sans-serif;font-weight:600;font-size:11px;color:var(--text-bright)">${escapeHtml(x.name)}</div>
+            <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim)">${label[x.status] || x.status}</div>
+          </div></div>`;
+      }
+      html += '</div>';
+      if (bad.some(x => x.status === 'missing')) {
+        html += `<div class="form-hint" style="margin-bottom:6px">Keys that exist in the mod but never reached <span style="font-family:monospace">keys/</span> can be copied across — no re-download needed.</div>`;
+      }
+      if (bad.some(x => x.status === 'unsigned')) {
+        html += `<div class="form-hint" style="margin-bottom:6px;color:var(--yellow)">A mod that ships no key cannot be fixed by copying. Either drop it from the client load order, or lower <b>Verify Signatures</b> under 🛡 Security${enforcing ? '' : ' (currently off, so this is not blocking anyone)'}.</div>`;
+      }
+    }
+    html += `<div class="config-row" style="justify-content:flex-start;gap:8px;margin-top:4px">
+      <button class="btn-save-config" style="margin:0" onclick="resyncArma3Keys('${s.id}')">🔑 Re-sync Keys</button></div>`;
+    if (verify !== null) {
+      html += `<div class="form-hint" style="margin-top:6px">Verify Signatures is <b>${escapeHtml(verify)}</b>${verify === '0' ? ' — signature checks are off, so nobody is blocked by missing keys.' : ' — clients must be signed by a key above.'}</div>`;
+    }
+    return html + '</div>';
+  } catch (e) { return ''; }
+}
+
+async function resyncArma3Keys(serverId) {
+  showToast('🔑', 'Re-syncing signature keys...');
+  try {
+    const r = await window.nexus.resyncArma3Keys(serverId);
+    if (r && r.ok) {
+      showToast(r.problems ? '⚠️' : '✅',
+        r.problems ? `${r.copied} keys copied — ${r.problems} mod${r.problems !== 1 ? 's' : ''} still unresolved`
+                   : `${r.copied} keys in place. Restart the server to load them.`);
+      renderConfigCard();
+    } else {
+      showToast('❌', (r && r.error) || 'Could not re-sync keys');
+    }
+  } catch (e) { showToast('❌', e.message); }
+}
+
 // ── Arma 3 mission picker ─────────────────────────────────────────────────────
 // A modded Arma server still idles until a mission is selected, so this sits
 // directly above the mod list in the Config panel.
