@@ -112,7 +112,6 @@ contextBridge.exposeInMainWorld('nexus', {
   listArma3Missions:   (sid)                        => ipcRenderer.invoke('list-arma3-missions', {serverId:sid}),
   setArma3Mission:     (sid, template, difficulty)  => ipcRenderer.invoke('set-arma3-mission', {serverId:sid, template, difficulty}),
   installArma3Mods:    (opts)                       => ipcRenderer.invoke('install-arma3-mods', opts),
-  getArma3Mods:        (serverId)                   => ipcRenderer.invoke('get-arma3-mods', serverId),
 
   // Tray
   trayRebuild: () => ipcRenderer.send('tray-rebuild'),

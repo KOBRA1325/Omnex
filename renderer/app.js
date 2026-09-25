@@ -2508,7 +2508,8 @@ async function saveArma3Mission(serverId) {
 
 async function renderArma3ModSection(s) {
   try {
-    const mods = await window.nexus.getArma3Mods(s.id);
+    const r = await window.nexus.getArma3Mods(s.id);
+    const mods = (r && r.mods) || [];
     let html = `<div class="config-group" style="margin-top:12px"><div class="config-group-label">🪖 Workshop Mods</div>`;
     if (!mods.length) html += '<div class="empty-msg-sm" style="margin-bottom:8px">No Workshop mods installed yet.</div>';
     else {
@@ -3491,6 +3492,7 @@ async function openWorkshopModal(){
   try {
     const mods=await window.nexus.getAntistasiMods();
     workshopSelectedMods=mods.filter(m=>m.required).map(m=>({...m}));
+    _workshopPack = mods;
     renderAntistasiModList(mods);
   } catch(e){}
   renderInstalledWorkshopMods(armaServer);
@@ -3539,19 +3541,34 @@ function addCustomMod(){
   document.getElementById('customModId').value=''; document.getElementById('customModName').value='';
   updateLaunchLine(); showToast('✅',`Added: ${name}`);
 }
+// Side lookup for the pack currently shown, so the preview can tell which
+// mods the server will actually load.
+let _workshopPack = [];
+function workshopSideOf(id){
+  const hit=_workshopPack.find(m=>String(m.id)===String(id));
+  return (hit&&hit.side)||'server';  // unknown mods load server-side, as main.js does
+}
 function updateLaunchLine(){
   const line=document.getElementById('workshopLaunchLine'); if(!line) return;
   if(!workshopSelectedMods.length){line.textContent='No mods selected';return;}
-  line.textContent=`-mod=${workshopSelectedMods.map(m=>`@${m.name.replace(/[^a-zA-Z0-9_]/g,'_')}`).join(';')}`;
+  // Only server-side mods go in -mod=; client-side ones are installed purely
+  // so the server holds their signature keys. Mirrors GAME_DEFS startArgs.
+  const srv=workshopSelectedMods.filter(m=>workshopSideOf(m.id)==='server');
+  const clientCount=workshopSelectedMods.length-srv.length;
+  const note=clientCount?`\n\n+ ${clientCount} client-side mod${clientCount!==1?'s':''} (keys only, not loaded by the server)`:'';
+  line.textContent=(srv.length?`-mod=${srv.map(m=>`mods\\@${m.name.replace(/[^a-zA-Z0-9_]/g,'_')}`).join(';')}`:'No server-side mods selected')+note;
 }
 async function renderInstalledWorkshopMods(s){
   const list=document.getElementById('installedWorkshopMods'); if(!list) return;
   try {
-    const mods=await window.nexus.getArma3Mods(s.id);
+    // get-arma3-mods answers {ok, mods} — reading .length off the envelope
+    // always gave undefined, so this panel claimed nothing was installed.
+    const r=await window.nexus.getArma3Mods(s.id);
+    const mods=(r&&r.mods)||[];
     const cnt=document.getElementById('installedModCount'); if(cnt) cnt.textContent=mods.length?`${mods.length} installed`:'';
     if(!mods.length){list.innerHTML='<div class="empty-msg-sm">No Workshop mods installed yet.</div>';return;}
     list.innerHTML=mods.map(m=>`<div class="workshop-mod-item"><span style="color:var(--green);font-size:14px">✓</span>
-      <div class="workshop-mod-info"><div class="workshop-mod-name">${escapeHtml(m.name)}</div><div class="workshop-mod-id">ID: ${m.id}</div></div>
+      <div class="workshop-mod-info"><div class="workshop-mod-name">${escapeHtml(m.name)}${m.side==='client'?' <span class="workshop-mod-tag">client-side</span>':''}</div><div class="workshop-mod-id">ID: ${m.id}${m.keys===0?' · no signature key':''}</div></div>
     </div>`).join('');
   } catch(e){list.innerHTML='<div class="empty-msg-sm">Could not load mods.</div>';}
 }
