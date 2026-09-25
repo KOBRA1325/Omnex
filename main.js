@@ -6036,13 +6036,19 @@ ipcMain.handle('set-arma3-mission', (e, { serverId, template, difficulty }) => {
   if (!server?.installDir) return { ok: false, error: 'Server not found' };
 
   const chosen = listArmaMissions(server).find(m => m.template === template);
-  if (!chosen) return { ok: false, error: 'Mission not found — reinstall the mods or drop a .pbo in mpmissions' };
+  // A mod may register its missions through CfgMissions rather than shipping
+  // .pbo files (Antistasi does exactly this), in which case the mission is
+  // real and loadable but nothing on disk reveals it. Accept a well-formed
+  // template we could not discover instead of refusing it.
+  if (!chosen && !/^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$/.test(String(template || ""))) {
+    return { ok: false, error: 'Enter a mission template as Name.Map, e.g. Antistasi_Malden.Malden' };
+  }
 
   // Arma only auto-starts missions from the server's own mpmissions/, so a
   // mission that lives inside a mod has to be copied across first.
   const mpDir = path.join(server.installDir, 'mpmissions');
   try { fs.mkdirSync(mpDir, { recursive: true }); } catch (e) {}
-  if (chosen.source !== 'server') {
+  if (chosen && chosen.source !== 'server') {
     const dest = path.join(mpDir, chosen.file);
     try {
       if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
@@ -6067,6 +6073,7 @@ ipcMain.handle('set-arma3-mission', (e, { serverId, template, difficulty }) => {
   server.armaDifficulty = difficulty || 'Regular';
   saveData();
   log(serverId, 'success', `✔ Mission set: ${template} (${server.armaDifficulty}). Restart the server to load it.`);
+  if (!chosen) log(serverId, 'info', 'This template was not found on disk — if the server still shows the mission vote screen, check the spelling against the list Arma offers there.');
   return { ok: true, template, difficulty: server.armaDifficulty };
 });
 

@@ -2531,7 +2531,10 @@ async function renderArma3MissionSection(s) {
     _armaMissions = r.missions || [];
     let html = `<div class="config-group" style="margin-top:12px"><div class="config-group-label">🗺 Mission</div>`;
     if (!_armaMissions.length) {
-      html += `<div class="empty-msg-sm" style="margin-bottom:8px">No missions found yet. Install the Antistasi modpack below, or drop a <b>.pbo</b> into <span style="font-family:monospace">mpmissions/</span>.</div>`;
+      // Antistasi and mods like it register missions inside the mod rather than
+      // shipping .pbo files, so "none found" does not mean "none available".
+      html += `<div class="empty-msg-sm" style="margin-bottom:8px">No mission files in <span style="font-family:monospace">mpmissions/</span>. Mods like Antistasi register their missions inside the mod, so they will not appear here — type the template below.</div>`;
+      html += renderArma3ManualMission(s, r.current, r.difficulty);
       return html + '</div>';
     }
     const opts = _armaMissions.map(m =>
@@ -2549,13 +2552,34 @@ async function renderArma3MissionSection(s) {
     html += r.current
       ? `<div class="form-hint" style="margin-top:6px">Running <b>${escapeHtml(r.current)}</b>. Restart the server after changing this.</div>`
       : `<div class="form-hint" style="margin-top:6px;color:var(--yellow)">No mission set yet — the server will start and then sit idle until you apply one.</div>`;
+    html += renderArma3ManualMission(s, r.current, r.difficulty);
     return html + '</div>';
   } catch (e) { return ''; }
 }
 
-async function saveArma3Mission(serverId) {
-  const template = document.getElementById('armaMissionSelect')?.value;
-  const difficulty = document.getElementById('armaDifficultySelect')?.value || 'Regular';
+// Mods that register missions via CfgMissions expose no file to discover, so
+// the template has to be typeable. Arma's own mission vote screen lists the
+// exact names.
+function renderArma3ManualMission(s, current, difficulty) {
+  const diffs = ['Recruit','Regular','Veteran','Custom'].map(d =>
+    `<option value="${d}" ${d === (difficulty || 'Regular') ? 'selected' : ''}>${d}</option>`).join('');
+  return `<div class="config-row" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+      <div class="config-label">Or enter a mission template</div>
+      <input class="config-input" id="armaManualMission" placeholder="e.g. Antistasi_Malden.Malden"
+        value="${escapeHtml(current || '')}" style="pointer-events:all">
+      <select class="config-input" id="armaManualDifficulty">${diffs}</select>
+      <button class="btn-save-config" style="margin:0" onclick="saveArma3Mission('${s.id}', true)">💾 Apply Template</button>
+      <div class="form-hint">Use the exact name from the mission vote screen in-game.</div>
+    </div>`;
+}
+
+async function saveArma3Mission(serverId, manual) {
+  const template = manual
+    ? document.getElementById('armaManualMission')?.value.trim()
+    : document.getElementById('armaMissionSelect')?.value;
+  const difficulty = (manual
+    ? document.getElementById('armaManualDifficulty')?.value
+    : document.getElementById('armaDifficultySelect')?.value) || 'Regular';
   if (!template) { showToast('⚠️', 'Pick a mission first'); return; }
   showToast('🗺', 'Applying mission...');
   try {
