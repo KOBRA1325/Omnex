@@ -5868,12 +5868,26 @@ function auditArmaKeys(server) {
     });
   }
 
-  // Mods in the pack that were selected but never landed on disk.
+  // Mods recorded as installed whose folder has since gone.
   for (const rec of recorded) {
     if (rec.folderName && !seenFolders.has(rec.folderName)) {
+      seenFolders.add(rec.folderName);
       rows.push({ folder: rec.folderName, name: rec.name, side: rec.side || 'server',
                   keyCount: 0, missing: [], status: 'notinstalled' });
     }
+  }
+
+  // Pack mods that never downloaded at all. These have neither a folder nor a
+  // record, so the two loops above cannot see them — which is precisely how a
+  // failed download stays invisible until a player is refused for a mod the
+  // server was supposed to have. Check the pack definition itself.
+  for (const packMod of ANTISTASI_ULTIMATE_MODS) {
+    const folder = '@' + packMod.name.replace(/[^a-zA-Z0-9_]/g, '_');
+    if (seenFolders.has(folder)) continue;
+    if (recorded.some(r => String(r.id) === String(packMod.id))) continue;
+    seenFolders.add(folder);
+    rows.push({ folder, name: packMod.name, side: packMod.side || 'server',
+                keyCount: 0, missing: [], status: 'notinstalled', fromPack: true });
   }
 
   rows.sort((a, b) => {

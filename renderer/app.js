@@ -2486,6 +2486,9 @@ async function renderArma3KeySection(s) {
           </div></div>`;
       }
       html += '</div>';
+      if (bad.some(x => x.status === 'notinstalled')) {
+        html += `<div class="form-hint" style="margin-bottom:6px">A mod that never downloaded has no key to install. Re-run <b>Manage Workshop Mods</b> and select it — large mods like RHS sometimes fail partway and need another pass.</div>`;
+      }
       if (bad.some(x => x.status === 'missing')) {
         html += `<div class="form-hint" style="margin-bottom:6px">Keys that exist in the mod but never reached <span style="font-family:monospace">keys/</span> can be copied across — no re-download needed.</div>`;
       }
