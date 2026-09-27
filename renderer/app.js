@@ -1051,15 +1051,51 @@ function persistServerLayout() {
   const order = servers.map(s => ({ id: s.id, groupId: s.groupId || '', order: s.order || 0 }));
   try { window.nexus.saveServerLayout({ groups: serverGroups, order }); } catch (e) {}
 }
-function createServerGroup() {
-  const name = prompt('New group name:'); if (name == null) return;
+// ── In-app text prompt ────────────────────────────────────────────────────────
+// Electron does not implement window.prompt() — it throws "prompt() is and will
+// not be supported." — so anything calling it died on its first line and the
+// button appeared to do nothing. This is the replacement: same shape (resolves
+// to the string, or null when cancelled) so callers read the same way.
+let _uiPromptResolve = null;
+function uiPrompt(message, defaultValue) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('promptModal');
+    const label = document.getElementById('promptModalLabel');
+    const input = document.getElementById('promptModalInput');
+    if (!modal || !input) { resolve(null); return; }  // never hang if markup is missing
+    if (label) label.textContent = message || '';
+    input.value = defaultValue == null ? '' : String(defaultValue);
+    _uiPromptResolve = resolve;
+    showModal('promptModal');
+    setTimeout(() => { input.focus(); input.select(); }, 60);
+  });
+}
+function uiPromptSubmit() {
+  const input = document.getElementById('promptModalInput');
+  const value = input ? input.value : '';
+  const done = _uiPromptResolve; _uiPromptResolve = null;
+  hideModal('promptModal');
+  if (done) done(value);
+}
+function uiPromptCancel() {
+  const done = _uiPromptResolve; _uiPromptResolve = null;
+  hideModal('promptModal');
+  if (done) done(null);
+}
+function uiPromptKey(e) {
+  if (e.key === 'Enter') { e.preventDefault(); uiPromptSubmit(); }
+  else if (e.key === 'Escape') { e.preventDefault(); uiPromptCancel(); }
+}
+
+async function createServerGroup() {
+  const name = await uiPrompt('New group name:'); if (name == null) return;
   const nm = name.trim(); if (!nm) return;
   serverGroups.push({ id: 'g' + Date.now().toString(36), name: nm, collapsed: false });
   persistServerLayout(); renderSidebar();
 }
-function renameServerGroup(gid) {
+async function renameServerGroup(gid) {
   const g = serverGroups.find(x => x.id === gid); if (!g) return;
-  const name = prompt('Rename group:', g.name); if (name == null) return;
+  const name = await uiPrompt('Rename group:', g.name); if (name == null) return;
   const nm = name.trim(); if (!nm) return;
   g.name = nm; persistServerLayout(); renderSidebar();
 }
@@ -1875,7 +1911,7 @@ async function deleteTemplate(e, id) {
 }
 async function saveAsTemplate() {
   const s = getActive(); if(!s) return; closeMoreMenu();
-  const name = prompt('Template name:', `${s.name} Template`); if(!name) return;
+  const name = await uiPrompt('Template name:', `${s.name} Template`); if(!name || !name.trim()) return;
   const result = await window.nexus.saveTemplate(s.id, name);
   if(result.ok) showToast('📋',`Template "${name}" saved`);
 }

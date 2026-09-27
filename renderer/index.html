@@ -1392,6 +1392,21 @@
   </div>
 </div>
 
+<!-- TEXT PROMPT (Electron has no window.prompt) -->
+<div class="modal-overlay" id="promptModal" style="display:none">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-title"><span id="promptModalLabel">Enter a value</span></div>
+    <div class="form-row" style="margin:10px 0">
+      <input type="text" class="form-input" id="promptModalInput"
+        style="pointer-events:all" onkeydown="uiPromptKey(event)" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="uiPromptCancel()">Cancel</button>
+      <button class="btn-modal-save" onclick="uiPromptSubmit()">OK</button>
+    </div>
+  </div>
+</div>
+
 <!-- STEAM GUARD ALERT BANNER -->
 <div id="steamGuardAlert" style="display:none; position:fixed; top:60px; left:50%; transform:translateX(-50%); z-index:8000; background:linear-gradient(135deg, rgba(255,215,0,0.15), rgba(255,165,0,0.1)); border:2px solid var(--yellow); border-radius:10px; padding:14px 20px; min-width:380px; max-width:520px; box-shadow:0 8px 30px rgba(0,0,0,0.5), 0 0 30px rgba(255,215,0,0.2); ">
   <div style="display:flex; align-items:flex-start; gap:12px">
