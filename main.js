@@ -337,6 +337,18 @@ const GAME_DEFS = {
       if (mods.length) args.push('-mod=' + mods.map(m => 'mods\\' + m).join(';'));
       return args;
     } },
+  // Arma Reforger — app 1874900 IS downloadable anonymously (unlike Arma 3),
+  // so it uses the ordinary steam path. Roughly a 10 GB install.
+  'Arma Reforger':   { type:'steam', serverAppId:'1874900', startExe:'ArmaReforgerServer.exe', startArgs:(d,s)=>{
+    const args = [
+      '-config',  path.join(d, 'configs', 'server.json'),
+      '-profile', path.join(d, 'profile'),
+      // Uncapped, the server pins a core at thousands of FPS for no benefit.
+      '-maxFPS',  String(s.reforgerMaxFPS || 60),
+    ];
+    if (s.port) args.push('-port', String(s.port));
+    return args;
+  } },
   'FiveM':           { type:'fivem', startExe:'FXServer.exe', startArgs:(d,s)=>['+exec','server.cfg'] },
   // Farming Simulator 25 — import-only (Giants gates the download behind a separate
   // license; can't be fetched by SteamCMD). Managed via its web admin panel (:8080).
@@ -1515,6 +1527,71 @@ function syncServerConfig(serverId, server, isInstall = false) {
       // campaign saves into it, so it must exist before the first start.
       try { fs.mkdirSync(path.join(server.installDir, 'profiles'), { recursive: true }); } catch (e) {}
       if (isInstall) log(serverId, 'success', `✔ server.cfg written (port ${port || 2302}).`);
+    }
+
+    else if (server.game === 'Arma Reforger') {
+      // Reforger's config is nested JSON, not Arma 3's key = value; format. Omnex
+      // owns a handful of fields and merges them into whatever is already there,
+      // so hand edits elsewhere in the file survive.
+      const cfgDir  = path.join(server.installDir, 'configs');
+      const cfgPath = path.join(cfgDir, 'server.json');
+      try { fs.mkdirSync(cfgDir, { recursive: true }); } catch (e) {}
+      // -profile points here; Reforger writes logs, saves and downloaded addons into it.
+      try { fs.mkdirSync(path.join(server.installDir, 'profile'), { recursive: true }); } catch (e) {}
+
+      const gamePort = Number(port || server.port || 2001);
+      let cfg = null;
+      if (fs.existsSync(cfgPath)) {
+        try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (e) { cfg = null; }
+      }
+      if (cfg && typeof cfg === 'object') {
+        cfg.bindPort   = gamePort;
+        cfg.publicPort = gamePort;
+        cfg.game = cfg.game || {};
+        cfg.game.name = gameName;
+        if (server.maxPlayers) cfg.game.maxPlayers = Number(server.maxPlayers);
+      } else {
+        cfg = {
+          bindAddress: '',
+          bindPort: gamePort,
+          publicAddress: '',
+          publicPort: gamePort,
+          // A2S is what puts the server in the in-game browser.
+          a2s: { address: '0.0.0.0', port: 17777 },
+          // NOTE: no rcon block by default. Reforger refuses to start when rcon is
+          // present with an empty or too-short password, so it is better absent
+          // until the user sets one in Config.
+          game: {
+            name: gameName,
+            password: '',
+            passwordAdmin: '',
+            admins: [],
+            // Conflict Everon — the stock scenario. Replaced by whatever the
+            // scenario picker finds via -listScenarios.
+            scenarioId: '{ECC61978EDCC2B5A}Missions/23_Campaign.conf',
+            maxPlayers: Number(server.maxPlayers) || 64,
+            visible: true,
+            crossPlatform: false,
+            supportedPlatforms: ['PLATFORM_PC'],
+            modsRequiredByDefault: true,
+            gameProperties: {
+              serverMaxViewDistance: 1600,
+              serverMinGrassDistance: 0,
+              networkViewDistance: 1500,
+              disableThirdPerson: false,
+              fastValidation: true,
+              battlEye: true,
+              VONDisableUI: false,
+              VONDisableDirectSpeechUI: false,
+              VONCanTransmitCrossFaction: false,
+            },
+            mods: [],
+          },
+          operating: {},
+        };
+      }
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+      if (isInstall) log(serverId, 'success', `✔ configs/server.json written (port ${gamePort}, query 17777).`);
     }
 
     else if (server.game === 'Terraria') {
@@ -3170,6 +3247,71 @@ GAME_CONFIG_DEFS['Arma 3'] = {
   ],
 };
 
+// ── Arma Reforger config (nested JSON) ───────────────────────────────────────
+// Reforger's server.json nests its settings (game.name, game.gameProperties.*),
+// whereas the plain 'json' type edits flat top-level keys. So this schema keys
+// its props by dot path and gets a 'jsonpath' reader/writer, which also means the
+// renderer needs no changes — it just sees a key it can round-trip.
+function getJsonPath(obj, dotted) {
+  let cur = obj;
+  for (const part of String(dotted).split('.')) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[part];
+  }
+  return cur;
+}
+function setJsonPath(obj, dotted, value) {
+  const parts = String(dotted).split('.');
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const p = parts[i];
+    if (cur[p] == null || typeof cur[p] !== 'object' || Array.isArray(cur[p])) cur[p] = {};
+    cur = cur[p];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+// The editor hands everything back as a string; Reforger's parser is strict about
+// types, so coerce by what the schema says the field is.
+function coerceConfigValue(raw, type) {
+  if (type === 'number') {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (type === 'bool') return raw === true || String(raw).toLowerCase() === 'true';
+  return String(raw);
+}
+
+GAME_CONFIG_DEFS['Arma Reforger'] = {
+  file: 'configs/server.json',
+  type: 'jsonpath',
+  props: [
+    { group: '🌍 Server', props: [
+      { key: 'game.name',          label: 'Server Name',   type: 'text',   basic: true },
+      { key: 'game.password',      label: 'Join Password', type: 'text',   basic: true, desc: 'Leave empty for a public server.' },
+      { key: 'game.passwordAdmin', label: 'Admin Password',type: 'text' },
+      { key: 'game.maxPlayers',    label: 'Max Players',   type: 'number', basic: true, desc: '1–128.' },
+      { key: 'bindPort',           label: 'Game Port',     type: 'number', desc: 'UDP. The A2S query port (17777) must also be open.' },
+      { key: 'a2s.port',           label: 'Query Port',    type: 'number', desc: 'UDP. Without this the server will not appear in the browser.' },
+      { key: 'game.visible',       label: 'Show in Server Browser', type: 'bool' },
+    ]},
+    { group: '🎮 Gameplay', props: [
+      { key: 'game.crossPlatform',                    label: 'Allow Console Players', type: 'bool',
+        desc: 'Crossplay. Console players cannot join servers running PC-only mods.' },
+      { key: 'game.gameProperties.disableThirdPerson', label: 'Force First Person',   type: 'bool' },
+      { key: 'game.gameProperties.battlEye',           label: 'BattlEye Anti-Cheat',  type: 'bool' },
+      { key: 'game.gameProperties.VONDisableUI',       label: 'Hide Voice Chat UI',   type: 'bool' },
+      { key: 'game.gameProperties.VONCanTransmitCrossFaction', label: 'Cross-Faction Voice', type: 'bool' },
+      { key: 'game.modsRequiredByDefault',             label: 'Require Mods to Join', type: 'bool' },
+    ]},
+    { group: '🖥 Performance', props: [
+      { key: 'game.gameProperties.serverMaxViewDistance',  label: 'Max View Distance',  type: 'number', desc: '500–10000. Lower costs less CPU.' },
+      { key: 'game.gameProperties.networkViewDistance',    label: 'Network View Distance', type: 'number', desc: '500–5000.' },
+      { key: 'game.gameProperties.serverMinGrassDistance', label: 'Min Grass Distance', type: 'number', desc: '0, or 50–150.' },
+      { key: 'game.gameProperties.fastValidation',         label: 'Fast Validation',    type: 'bool' },
+    ]},
+  ],
+};
+
 // Enhanced read-config that handles multiple file types
 ipcMain.handle('read-server-config', (e, id) => {
   const server = appData.servers.find(s => s.id === id);
@@ -3240,6 +3382,17 @@ ipcMain.handle('read-server-config', (e, id) => {
 
       if (def.type === 'json') {
         try { props = JSON.parse(raw); } catch(e) {}
+      } else if (def.type === 'jsonpath') {
+        // Flatten only the paths the schema declares — the renderer keys off them.
+        try {
+          const parsed = JSON.parse(raw);
+          for (const group of def.props) {
+            for (const prop of group.props) {
+              const v = getJsonPath(parsed, prop.key);
+              if (v !== undefined) props[prop.key] = typeof v === 'boolean' ? String(v) : v;
+            }
+          }
+        } catch(e) {}
       } else if (def.type === 'armacfg') {
         props = parseArmaCfg(raw);
       } else if (def.type === 'xml') {
@@ -3309,6 +3462,18 @@ ipcMain.handle('write-steam-config', (e, { id, props, configPath }) => {
       const existing = JSON.parse(fs.readFileSync(configPath, 'utf8') || '{}');
       const merged = { ...existing, ...props };
       fs.writeFileSync(configPath, JSON.stringify(merged, null, 2));
+    } else if (def.type === 'jsonpath') {
+      // Merge into the file that is there, so anything the schema does not
+      // cover (mods, operating, rcon) survives an edit.
+      let doc = {};
+      try { doc = JSON.parse(fs.readFileSync(configPath, 'utf8') || '{}'); } catch(e) { doc = {}; }
+      const typeOf = {};
+      for (const group of def.props) for (const prop of group.props) typeOf[prop.key] = prop.type;
+      for (const [key, val] of Object.entries(props)) {
+        if (!(key in typeOf)) continue;  // never write keys the schema does not own
+        setJsonPath(doc, key, coerceConfigValue(val, typeOf[key]));
+      }
+      fs.writeFileSync(configPath, JSON.stringify(doc, null, 2));
     } else if (def.type === 'armacfg') {
       fs.writeFileSync(configPath, patchArmaCfg(fs.readFileSync(configPath, 'utf8'), props, def));
     } else if (def.type === 'xml') {
@@ -3502,6 +3667,8 @@ async function createBackup(serverId, label = 'Manual backup', trigger = 'manual
     // Arma 3: missions, the profile dir (persistent campaign saves + .rpt logs),
     // server-side mod configs, and the signature keys that let clients connect.
     'Arma 3':      ['mpmissions', 'profiles', 'userconfig', 'keys'],
+    // Reforger keeps saves, logs and downloaded addons in the profile dir.
+    'Arma Reforger': ['profile', 'configs'],
   };
   const foldersToBackup = GAME_BACKUP_FOLDERS[server.game] ||
     ['world', 'world_nether', 'world_the_end', 'saves', 'config', 'mods', 'plugins'];
@@ -5646,7 +5813,7 @@ const GAME_DEFAULT_PORTS = {
   'Minecraft':'25565', 'CS2':'27015', 'Valheim':'2456', 'Rust':'28015', 'Satisfactory':'15777',
   'Project Zomboid':'16261', 'Ark: Survival Evolved':'7777', 'V Rising':'9876', 'Terraria':'7777',
   '7 Days to Die':'26900', 'Palworld':'8211', 'Enshrouded':'15636', 'Farming Simulator 25':'10823',
-  'Ark: Survival Ascended':'7777', 'FiveM':'30120', 'Arma 3':'2302',
+  'Ark: Survival Ascended':'7777', 'FiveM':'30120', 'Arma 3':'2302', 'Arma Reforger':'2001',
 };
 
 // Best-effort: read the actual configured port out of a known server config file.
@@ -5662,6 +5829,9 @@ function detectServerPort(dir, game) {
       if (m) return m[1];
     } else if (game === 'Terraria') {
       const m = (readIf(path.join(dir, 'serverconfig.txt')) || '').match(/^\s*port\s*=\s*(\d+)/m);
+      if (m) return m[1];
+    } else if (game === 'Arma Reforger') {
+      const m = (readIf(path.join(dir, 'configs', 'server.json')) || '').match(/"bindPort"\s*:\s*(\d+)/);
       if (m) return m[1];
     } else if (game === 'Enshrouded') {
       const m = (readIf(path.join(dir, 'enshrouded_server.json')) || '').match(/"gamePort"\s*:\s*(\d+)/);
@@ -5807,6 +5977,107 @@ ipcMain.handle('save-steam-guard-code', (e, code) => {
   return { ok: true };
 });
 ipcMain.handle('get-antistasi-mods', () => ANTISTASI_ULTIMATE_MODS);
+
+// ── Arma Reforger scenarios ──────────────────────────────────────────────────
+// Scenario ids are GUIDs like {ECC61978EDCC2B5A}Missions/23_Campaign.conf, and
+// mods add their own. Rather than hardcode a list that would rot, ask the server
+// binary: -listScenarios makes it print every .conf it can load. That also picks
+// up scenarios from installed mods for free.
+const REFORGER_SCENARIO_RE = /\{[0-9A-Fa-f]{16}\}[^\s"'\\]+\.conf/g;
+
+// Friendly names for the stock scenarios. Unknown ids (mods) fall back to the
+// filename, so this never has to be exhaustive.
+function reforgerScenarioLabel(id) {
+  const file = String(id).split('/').pop().replace(/\.conf$/i, '');
+  const pretty = file
+    .replace(/^\d+[_-]?/, '')          // drop the leading 23_ / 21_ ordering prefix
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  return pretty || file;
+}
+
+ipcMain.handle('list-reforger-scenarios', (e, { serverId }) => new Promise((resolve) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) { resolve({ ok: false, error: 'Server not found' }); return; }
+  const exe = server.execPath && fs.existsSync(server.execPath)
+    ? server.execPath
+    : findExe(server.installDir, 'ArmaReforgerServer.exe');
+  if (!exe) { resolve({ ok: false, error: 'ArmaReforgerServer.exe not found — install the server first' }); return; }
+
+  const current = (() => {
+    try {
+      const doc = JSON.parse(fs.readFileSync(path.join(server.installDir, 'configs', 'server.json'), 'utf8'));
+      return getJsonPath(doc, 'game.scenarioId') || '';
+    } catch (err) { return ''; }
+  })();
+
+  log(serverId, 'info', 'Asking the server binary which scenarios it can load (-listScenarios)...');
+  const proc = spawn(exe, ['-listScenarios', '-profile', path.join(server.installDir, 'profile'), '-maxFPS', '5'],
+    { cwd: server.installDir, windowsHide: true });
+
+  let out = '';
+  const finish = (() => {
+    let done = false;
+    return (result) => {
+      if (done) return; done = true;
+      clearTimeout(timer);
+      try { proc.kill(); } catch (err) {}   // it does not reliably exit on its own
+      resolve(result);
+    };
+  })();
+
+  // It boots the engine to enumerate, so give it room — but never hang forever.
+  const timer = setTimeout(() => {
+    const found = collect();
+    finish(found.length
+      ? { ok: true, scenarios: found, current, partial: true }
+      : { ok: false, error: 'Timed out before any scenario was listed. Start the server once, then try again.', current });
+  }, 90000);
+
+  function collect() {
+    const seen = new Set();
+    for (const m of out.match(REFORGER_SCENARIO_RE) || []) {
+      if (!seen.has(m)) seen.add(m);
+    }
+    return [...seen].map(id => ({ id, label: reforgerScenarioLabel(id) }));
+  }
+
+  proc.stdout.on('data', d => { out += d.toString(); });
+  proc.stderr.on('data', d => { out += d.toString(); });
+  proc.on('error', err => finish({ ok: false, error: err.message, current }));
+  proc.on('close', () => {
+    const found = collect();
+    if (found.length) log(serverId, 'success', `✔ Found ${found.length} scenario${found.length !== 1 ? 's' : ''}.`);
+    finish(found.length
+      ? { ok: true, scenarios: found, current }
+      : { ok: false, error: 'The server listed no scenarios. You can still enter a scenario id by hand.', current });
+  });
+}));
+
+ipcMain.handle('set-reforger-scenario', (e, { serverId, scenarioId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  const id = String(scenarioId || '').trim();
+  // Guard the shape rather than the exact GUID, so mod scenarios are accepted.
+  if (!/^\{[0-9A-Fa-f]{16}\}[^\s"'\\]+\.conf$/.test(id)) {
+    return { ok: false, error: 'Scenario id must look like {ECC61978EDCC2B5A}Missions/23_Campaign.conf' };
+  }
+  const cfgPath = path.join(server.installDir, 'configs', 'server.json');
+  if (!fs.existsSync(cfgPath)) { try { syncServerConfig(serverId, server, false); } catch (err) {} }
+  let doc = {};
+  try { doc = JSON.parse(fs.readFileSync(cfgPath, 'utf8') || '{}'); } catch (err) {
+    return { ok: false, error: 'configs/server.json is missing or unreadable' };
+  }
+  setJsonPath(doc, 'game.scenarioId', id);
+  try { fs.writeFileSync(cfgPath, JSON.stringify(doc, null, 2)); } catch (err) {
+    return { ok: false, error: 'Could not write configs/server.json: ' + err.message };
+  }
+  server.reforgerScenario = id;
+  saveData();
+  log(serverId, 'success', `✔ Scenario set: ${id}. Restart the server to load it.`);
+  return { ok: true, scenarioId: id };
+});
 
 // ── Arma 3 signature key audit ───────────────────────────────────────────────
 // With verifySignatures on, a mod whose .bikey never reached keys/ rejects every

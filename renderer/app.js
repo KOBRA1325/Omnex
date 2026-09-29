@@ -182,6 +182,7 @@ const GAMES = [
   { name:'Enshrouded',      port:'15636', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1203620/capsule_sm_120.jpg', fallback:'🌫️' },
   { name:'Farming Simulator 25', port:'10823', icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/2300320/capsule_sm_120.jpg', fallback:'🚜', importOnly:true },
   { name:'Arma 3',          port:'2302',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/107410/capsule_sm_120.jpg', fallback:'🪖' },
+  { name:'Arma Reforger',   port:'2001',  icon:'https://cdn.cloudflare.steamstatic.com/steam/apps/1874880/capsule_sm_120.jpg', fallback:'🎖️' },
   { name:'FiveM',           port:'30120', icon:'', fallback:'🚗' },
 ];
 
@@ -1777,6 +1778,8 @@ function updateInstallInfo() {
     ? `${g.name} is import-only — install its dedicated server from your own account, then use the Import tab to add it. Omnex can't download it automatically.`
     : g.name === 'FiveM'
     ? `Omnex will download the recommended FXServer build + default resources (no Steam/account needed). You'll need a FREE Cfx.re license key from keymaster.fivem.net — add it in Config, then Start. RP frameworks (QBCore/ESX) are add-ons you install after.`
+    : g.name === 'Arma Reforger'
+    ? `Omnex will download SteamCMD and install the Arma Reforger dedicated server. No Steam account required. ⚠ It is a large install — around 10 GB — so make sure you have the space free.`
     : g.name === 'Arma 3'
     ? `Omnex will install the Arma 3 dedicated server (Steam app 233780) via SteamCMD. This is the one game that needs a Steam login — Steam refuses anonymous downloads for it, so connect your account in Settings → Connections first.`
     : g.name === 'Terraria'
@@ -2299,7 +2302,9 @@ async function renderConfigCard() {
   // config schema of its own.
   const arHtml = ((s.game === 'Arma 3')
     ? (await renderArma3MissionSection(s)) + (await renderArma3KeySection(s)) + (await renderArma3ModSection(s))
-    : '') + (await renderAutoRestartSection());
+    : (s.game === 'Arma Reforger')
+      ? (await renderReforgerScenarioSection(s))
+      : '') + (await renderAutoRestartSection());
   try {
     const result = await window.nexus.readServerConfig(s.id);
     if (result.ok && result.type === 'minecraft') {
@@ -2493,6 +2498,65 @@ async function saveSteamConfig(configPath) {
   try { const r=await window.nexus.writeSteamConfig(s.id,window._steamConfigProps,configPath); showToast(r.ok?'💾':'❌',r.ok?'Config saved!':r.error||'Save failed'); }
   catch(e){showToast('❌',e.message);}
 }
+// ── Arma Reforger scenario picker ─────────────────────────────────────────────
+// Scenario ids are GUIDs, so they are discovered by asking the server binary
+// rather than hardcoded. Discovery boots the engine and takes a while, so it runs
+// on demand rather than every time the panel renders.
+let _reforgerScenarios = [];
+async function renderReforgerScenarioSection(s) {
+  const current = s.reforgerScenario || '';
+  let html = `<div class="config-group" style="margin-top:12px"><div class="config-group-label">🗺 Scenario</div>`;
+  if (_reforgerScenarios.length) {
+    const opts = _reforgerScenarios.map(x =>
+      `<option value="${escapeHtml(x.id)}" ${x.id === current ? 'selected' : ''}>${escapeHtml(x.label)}</option>`).join('');
+    html += `<div class="config-row"><div class="config-label">Scenario</div>
+      <select class="config-input" id="reforgerScenarioSelect">${opts}</select></div>`;
+    html += `<div class="config-row" style="justify-content:flex-start;gap:8px">
+      <button class="btn-save-config" style="margin:0" onclick="applyReforgerScenario('${s.id}')">💾 Apply Scenario</button></div>`;
+  } else {
+    html += `<div class="empty-msg-sm" style="margin-bottom:8px">Scenario ids are GUIDs supplied by the game and its mods. Load the list from the installed server, or paste an id below.</div>`;
+    html += `<div class="config-row" style="justify-content:flex-start;gap:8px">
+      <button class="btn-save-config" style="margin:0" onclick="loadReforgerScenarios('${s.id}')">🔍 Load Scenario List</button></div>`;
+    html += `<div class="form-hint" style="margin-top:6px">This starts the server briefly to ask what it can load, so it can take a minute.</div>`;
+  }
+  html += `<div class="config-row" style="flex-direction:column;align-items:stretch;gap:6px;margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+      <div class="config-label">Or paste a scenario id</div>
+      <input class="config-input" id="reforgerScenarioManual" placeholder="{ECC61978EDCC2B5A}Missions/23_Campaign.conf"
+        value="${escapeHtml(current)}" style="pointer-events:all">
+      <button class="btn-save-config" style="margin:0" onclick="applyReforgerScenario('${s.id}', true)">💾 Apply Id</button>
+    </div>`;
+  html += current
+    ? `<div class="form-hint" style="margin-top:6px">Running <b>${escapeHtml(current)}</b>. Restart the server after changing this.</div>`
+    : `<div class="form-hint" style="margin-top:6px">Using whatever is in <span style="font-family:monospace">configs/server.json</span>.</div>`;
+  return html + '</div>';
+}
+
+async function loadReforgerScenarios(serverId) {
+  showToast('🔍', 'Starting the server to list scenarios — this can take a minute...');
+  try {
+    const r = await window.nexus.listReforgerScenarios(serverId);
+    if (r && r.ok) {
+      _reforgerScenarios = r.scenarios || [];
+      showToast('✅', `Found ${_reforgerScenarios.length} scenario${_reforgerScenarios.length !== 1 ? 's' : ''}${r.partial ? ' (list may be incomplete)' : ''}`);
+      renderConfigCard();
+    } else {
+      showToast('⚠️', (r && r.error) || 'Could not list scenarios');
+    }
+  } catch (e) { showToast('❌', e.message); }
+}
+
+async function applyReforgerScenario(serverId, manual) {
+  const id = manual
+    ? document.getElementById('reforgerScenarioManual')?.value.trim()
+    : document.getElementById('reforgerScenarioSelect')?.value;
+  if (!id) { showToast('⚠️', 'Pick or paste a scenario id first'); return; }
+  try {
+    const r = await window.nexus.setReforgerScenario(serverId, id);
+    if (r && r.ok) { showToast('✅', 'Scenario set. Restart the server to load it.'); renderConfigCard(); }
+    else showToast('❌', (r && r.error) || 'Could not set the scenario');
+  } catch (e) { showToast('❌', e.message); }
+}
+
 // ── Arma 3 signature keys ─────────────────────────────────────────────────────
 // A missing key only shows up as a player being refused at the join screen, so
 // surface the mismatch here instead.
@@ -2708,6 +2772,8 @@ async function addFirewallRule(id) {
   // so a server that's up but invisible in the browser is usually just these.
   const extraPorts = s.game === 'Palworld' ? [27015]
     : s.game === 'Arma 3' ? [Number(s.port || 2302) + 1, Number(s.port || 2302) + 2]
+    // Reforger answers Steam queries on a fixed 17777 rather than port+1.
+    : s.game === 'Arma Reforger' ? [17777]
     : [];
   const portList = [s.port, ...extraPorts];
   if (!confirm(`Open port${portList.length>1?'s':''} ${portList.join(', ')} in Windows Firewall for "${s.name}"?\n\nThis creates inbound rules (TCP + UDP). Windows may prompt for admin access.`)) return;
@@ -2744,7 +2810,7 @@ async function renderNetworkCard() {
       <button class="btn-firewall" onclick="addFirewallRule('${s.id}')" style="width:100%; margin-top:10px; padding:9px 12px; background:rgba(0,229,255,0.06); border:1px solid rgba(0,229,255,0.35); color:var(--accent); border-radius:6px; cursor:pointer; font-family:'Exo 2',sans-serif; font-size:12px; display:flex; align-items:center; justify-content:center; gap:8px; transition:all 0.15s">
         <span>🛡️</span> Open Port ${s.port} in Windows Firewall
       </button>
-      <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}${s.game==='Arma 3'?` + ${Number(s.port||2302)+1}–${Number(s.port||2302)+2} for the Steam server browser`:''}.</div>
+      <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}${s.game==='Arma 3'?` + ${Number(s.port||2302)+1}–${Number(s.port||2302)+2} for the Steam server browser`:''}${s.game==='Arma Reforger'?' + 17777 for the server browser':''}.</div>
       <div class="network-row" style="flex-direction:column; align-items:stretch; gap:6px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px">
         <div class="network-label" style="display:flex; align-items:center; gap:6px">💬 Discord webhook <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
         <div style="display:flex; gap:6px; align-items:center">
