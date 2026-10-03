@@ -17,6 +17,7 @@
     "url": "https://github.com/KOBRA1325/omnex/issues"
   },
   "scripts": {
+    "test": "node tests/run.js",
     "start": "electron .",
     "build": "set CSC_IDENTITY_AUTO_DISCOVERY=false && electron-builder --win nsis",
     "release": "electron-builder --win nsis --publish always"
