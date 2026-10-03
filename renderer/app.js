@@ -2797,6 +2797,7 @@ async function renderNetworkCard() {
   body.innerHTML='<div class="empty-msg-sm">Fetching network info...</div>';
   try {
     const info = await window.nexus.getNetworkInfo(s.port);
+    const discordSummary = netDiscordSummary(s);
     body.innerHTML=`
       <div class="network-row"><div class="network-label">Local IP</div>
         <div class="network-value"><span>${info.localIp}</span>
@@ -2812,26 +2813,51 @@ async function renderNetworkCard() {
       </button>
       <div class="network-hint">Give friends your <b>Public IP</b> for outside connections.<br>Use <b>Local IP</b> for same-network players.<br>The firewall button opens Port ${s.port} (TCP + UDP)${s.game==='Palworld'?' + 27015 for community listing':''}${s.game==='Arma 3'?` + ${Number(s.port||2302)+1}–${Number(s.port||2302)+2} for the Steam server browser`:''}${s.game==='Arma Reforger'?' + 17777 for the server browser':''}.</div>
       <div class="network-row" style="flex-direction:column; align-items:stretch; gap:6px; margin-top:12px; border-top:1px solid var(--border); padding-top:12px">
-        <div class="network-label" style="display:flex; align-items:center; gap:6px">💬 Discord webhook <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
-        <div style="display:flex; gap:6px; align-items:center">
-          <input type="text" id="svWebhookInput" class="form-input" placeholder="Blank = use global webhook"
-            value="${escapeHtml(s.discordWebhookUrl||'')}" style="flex:1; pointer-events:all; font-size:11px"
-            onchange="saveServerWebhook(this.value)">
-          <button class="btn-copy" style="pointer-events:all; padding:4px 8px" title="Send a test message to this channel" onclick="testServerWebhook(this)">🔔</button>
+        <div class="network-label" style="display:flex; align-items:center; gap:6px; cursor:pointer" onclick="toggleNetDiscord()"
+             title="Per-server Discord webhook and command access">
+          <span class="sg-caret${_netDiscordOpen ? ' open' : ''}" id="netDiscordCaret">▸</span>
+          <span>💬 Discord</span>
+          <span id="netDiscordSummary" style="margin-left:auto; color:var(--text-dim); font-weight:400; font-size:10px">${discordSummary}</span>
         </div>
-        <div class="network-hint" style="margin-top:2px">Route <b>${escapeHtml(s.name)}</b>'s feed to its own channel. Leave blank to use the global webhook from Settings → Discord.</div>
-        <div class="network-label" style="display:flex; align-items:center; gap:6px; margin-top:10px">🔑 Command access <span style="color:var(--text-dim); font-weight:400; font-size:10px">(this server)</span></div>
-        <div style="display:flex; gap:6px; align-items:center">
-          <input type="text" id="svAllowAddInput" class="form-input" placeholder="Discord user ID, press Enter" style="flex:1; pointer-events:all; font-size:11px"
-            onkeydown="if(event.key==='Enter'){event.preventDefault();addServerAllowUser();}">
-          <button class="btn-copy" style="pointer-events:all; padding:4px 9px" title="Add user" onclick="addServerAllowUser()">+</button>
+        <div id="netDiscordBody" style="display:${_netDiscordOpen ? 'flex' : 'none'}; flex-direction:column; gap:6px">
+          <div style="display:flex; gap:6px; align-items:center">
+            <input type="text" id="svWebhookInput" class="form-input" placeholder="Webhook URL — blank uses the global one"
+              value="${escapeHtml(s.discordWebhookUrl||'')}" style="flex:1; pointer-events:all; font-size:11px"
+              title="Route this server's feed to its own channel. Blank uses the global webhook from Settings → Discord."
+              onchange="saveServerWebhook(this.value)">
+            <button class="btn-copy" style="pointer-events:all; padding:4px 8px" title="Send a test message to this channel" onclick="testServerWebhook(this)">🔔</button>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center">
+            <input type="text" id="svAllowAddInput" class="form-input" placeholder="Discord user ID — Enter to allow commands" style="flex:1; pointer-events:all; font-size:11px"
+              title="These users may run /start /stop /restart /backup for this server. Admins in Settings → Discord already control every server, and /status is open to anyone."
+              onkeydown="if(event.key==='Enter'){event.preventDefault();addServerAllowUser();}">
+            <button class="btn-copy" style="pointer-events:all; padding:4px 9px" title="Add user" onclick="addServerAllowUser()">+</button>
+          </div>
+          <div class="allow-chips" id="svAllowChips"></div>
+          <div class="network-hint" style="margin-top:2px">Blank webhook uses <b>Settings → Discord</b>. Listed users may run /start /stop /restart /backup.</div>
         </div>
-        <div class="allow-chips" id="svAllowChips"></div>
-        <div class="network-hint" style="margin-top:2px">These users may run <b>${escapeHtml(s.name)}</b>'s commands (/start /stop /restart /backup). Admins in Settings → Discord can control every server. /status is open to anyone.</div>
       </div>`;
       renderAllowChips('svAllowChips', parseIds(s.discordAllowedUsers), removeServerAllowUser);
   } catch(e) { body.innerHTML='<div class="empty-msg-sm">Could not fetch network info.</div>'; }
 }
+// The per-server Discord settings are optional and rarely changed, so they sit
+// behind a disclosure rather than taking a dozen lines of the Network card.
+let _netDiscordOpen = false;
+function toggleNetDiscord() {
+  const body = document.getElementById('netDiscordBody');
+  const caret = document.getElementById('netDiscordCaret');
+  if (!body) return;
+  _netDiscordOpen = body.style.display === 'none';
+  body.style.display = _netDiscordOpen ? 'flex' : 'none';
+  if (caret) caret.classList.toggle('open', _netDiscordOpen);
+}
+// Collapsed summary: what is set, without opening it.
+function netDiscordSummary(s) {
+  const own = !!String(s.discordWebhookUrl || '').trim();
+  const n = parseIds(s.discordAllowedUsers).length;
+  return `${own ? 'Own channel' : 'Global webhook'} \u00b7 ${n ? n + ' user' + (n !== 1 ? 's' : '') : 'admins only'}`;
+}
+
 async function saveServerWebhook(value) {
   const s = getActive(); if (!s) return;
   const url = (value || '').trim();
