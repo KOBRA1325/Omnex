@@ -1084,7 +1084,21 @@ async function runInstall(id, server, config) {
 
   } else if (def.type === 'minecraft') {
     await installMinecraft(id, server.installDir, config);
-    server.execPath = path.join(server.installDir, 'server.jar');
+    // Forge and NeoForge (1.17+) have no runnable jar at all — their installers
+    // leave a run script that builds the module path. installForge/installNeoForge
+    // already point execPath at it, and hardcoding server.jar here clobbered that,
+    // so every Forge/NeoForge server started by trying to run a jar that does not
+    // exist ('Unable to access jarfile ... server.jar'). Prefer the run script for
+    // those loaders, and never trust findMinecraftJar to pick it: a NeoForge folder
+    // also contains the vanilla minecraft_server jar, which would launch unmodded.
+    const mcType = config.mcType || 'vanilla';
+    const runScript = ['run.bat', 'run.sh']
+      .map(f => path.join(server.installDir, f))
+      .find(f => fs.existsSync(f));
+    server.execPath = ((mcType === 'forge' || mcType === 'neoforge') && runScript)
+      || findMinecraftJar(server.installDir)
+      || path.join(server.installDir, 'server.jar');
+    server.useShell = /\.(bat|cmd|sh)$/i.test(server.execPath);
   }
   saveData();
 }
@@ -7403,7 +7417,23 @@ async function startServerById(id) {
     } catch(err) {
       return { ok:false, error:`Java setup failed: ${err.message}` };
     }
-    const mcExec = server.execPath || path.join(server.installDir, 'server.jar');
+    let mcExec = server.execPath || path.join(server.installDir, 'server.jar');
+    // Servers installed before the execPath fix recorded a server.jar that Forge and
+    // NeoForge never produce. Re-resolve rather than fail, so they heal on next start.
+    if (!fs.existsSync(mcExec)) {
+      const runScript = ['run.bat', 'run.sh']
+        .map(f => path.join(server.installDir, f))
+        .find(f => fs.existsSync(f));
+      const resolved = ((server.mcType === 'forge' || server.mcType === 'neoforge') && runScript)
+        || findMinecraftJar(server.installDir) || runScript;
+      if (resolved) {
+        mcExec = resolved;
+        server.execPath = resolved;
+        server.useShell = /\.(bat|cmd|sh)$/i.test(resolved);
+        saveData();
+        log(id, 'dim', 'Launch target repaired: ' + path.basename(resolved));
+      }
+    }
     if (/\.(bat|cmd|sh)$/i.test(mcExec)) {
       // Modern Forge / NeoForge (1.17+): no runnable jar — they launch via a
       // run script that invokes `java` with @args files. Run the script itself,
