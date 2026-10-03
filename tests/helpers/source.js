@@ -16,17 +16,52 @@ function source(relPath) {
 // Pull out a brace-balanced block starting at `sig`, e.g. 'function foo(' or
 // "ipcMain.handle('x'". Throws rather than returning a partial match, so a
 // renamed function fails the suite loudly instead of silently testing nothing.
+//
+// Braces inside strings and comments are skipped. That is not a nicety:
+// armaCfgDepth's body is literally `if (ch === '{') depth++;`, and a naive
+// counter walks straight past the real end of the function.
 function grab(src, sig) {
   const start = src.indexOf(sig);
   if (start === -1) throw new Error('not found in source: ' + sig);
-  let depth = 0;
   let i = src.indexOf('{', start);
   if (i === -1) throw new Error('no block body for: ' + sig);
+
+  let depth = 0;
+  let quote = null;        // ' " or ` while inside a string
+  let comment = null;      // 'line' or 'block'
+  let prev = '';           // last meaningful character, to tell regex from division
   for (; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') { depth--; if (!depth) break; }
+    const c = src[i], next = src[i + 1];
+    if (comment === 'line') { if (c === '\n') comment = null; continue; }
+    if (comment === 'block') { if (c === '*' && next === '/') { comment = null; i++; } continue; }
+    if (quote) {
+      if (c === '\\') { i++; continue; }           // escaped char
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '/' && next === '/') { comment = 'line'; i++; continue; }
+    if (c === '/' && next === '*') { comment = 'block'; i++; continue; }
+    // A regex literal, not division: patterns like replace(/"/g, '') contain
+    // quote characters that would otherwise look like the start of a string.
+    if (c === '/' && '(,=:[!&|?{};+-*%~^'.includes(prev)) {
+      let inClass = false;
+      for (i++; i < src.length; i++) {
+        const r = src[i];
+        if (r === '\\') { i++; continue; }
+        if (r === '[') inClass = true;
+        else if (r === ']') inClass = false;
+        else if (r === '/' && !inClass) break;
+        else if (r === '\n') break;                // not a regex after all
+      }
+      prev = '/';
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { quote = c; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (!depth) return src.slice(start, i + 1); }
+    if (!/\s/.test(c)) prev = c;
   }
-  return src.slice(start, i + 1);
+  throw new Error('unbalanced braces while reading: ' + sig);
 }
 
 // Collects pass/fail so each suite can report a single summary line.
