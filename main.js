@@ -2382,6 +2382,8 @@ async function installMinecraft(serverId, installDir, config) {
     resolvedVersion = await installFabric(serverId, installDir, version);
   } else if (type === 'forge') {
     resolvedVersion = await installForge(serverId, installDir, version);
+  } else if (type === 'neoforge') {
+    resolvedVersion = await installNeoForge(serverId, installDir, version);
   }
   // Save the actual resolved version back to the server record
   const srv = appData.servers.find(s => s.installDir === installDir);
@@ -2406,7 +2408,7 @@ async function installMinecraft(serverId, installDir, config) {
 // Forge) or plugins/ (Paper) via Modrinth, version-matched to this server. Also
 // pre-accepts BlueMap's texture download so it renders on first start. Best-effort.
 async function installBlueMapForServer(serverId, installDir, type, mcVersion) {
-  const loader = { fabric: 'fabric', forge: 'forge', paper: 'paper' }[type];
+  const loader = { fabric: 'fabric', forge: 'forge', neoforge: 'neoforge', paper: 'paper' }[type];
   if (!loader || !mcVersion || mcVersion === 'latest') return; // vanilla / unresolved → no BlueMap
   const targetDir = loader === 'paper' ? 'plugins' : 'mods';
   const destDir   = path.join(installDir, targetDir);
@@ -2548,6 +2550,103 @@ async function installFabric(serverId, installDir, version) {
   });
   log(serverId,'success',`✔ Fabric ${ver} downloaded.`);
   return ver;
+}
+
+// NeoForge is the Forge fork most 1.20.2+ mods moved to (Pixelmon among them),
+// and it installs the same way: an installer jar run with --installServer that
+// leaves a run.bat behind.
+//
+// Versioning drops Minecraft's leading "1.": MC 1.21.1 -> NeoForge 21.1.x,
+// MC 1.21 -> 21.0.x. NeoForge begins at MC 1.20.2 — there is no 1.20.1 build,
+// which is worth saying plainly because 1.20.1 is a very common server version.
+// NeoForge keys off Minecraft's first two version components, minus the historic
+// leading "1.". Minecraft dropped that prefix in 2026, so both shapes occur:
+//   1.21.1 -> 21.1.    1.21.11 -> 21.11.    1.21 -> 21.0.    26.3 -> 26.3.
+// All four confirmed against the live NeoForge version list.
+function neoforgePrefixFor(mcVersion) {
+  const parts = String(mcVersion).trim().split('.');
+  const base = parts[0] === '1' ? parts.slice(1) : parts;
+  if (!base.length || !/^\d+$/.test(base[0])) return null;
+  const minor = (base[1] && /^\d+$/.test(base[1])) ? base[1] : '0';
+  return `${base[0]}.${minor}.`;
+}
+
+async function fetchNeoForgeVersions() {
+  const data = await fetchJSON('https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge');
+  return Array.isArray(data.versions) ? data.versions : [];
+}
+
+// Which Minecraft versions NeoForge actually has stable builds for, newest first.
+// The names come from Mojang's manifest rather than being reconstructed from
+// NeoForge build numbers: doing the latter produced "1.26.3" for the release
+// Minecraft actually calls "26.3", which would have offered installs that 404.
+async function neoforgeMcVersions(allBuilds) {
+  const prefixes = new Set();
+  for (const v of allBuilds) {
+    if (/beta|alpha|rc/i.test(v)) continue;          // stable builds only
+    const m = String(v).match(/^(\d+)\.(\d+)\./);
+    if (m) prefixes.add(`${m[1]}.${m[2]}.`);
+  }
+  if (!prefixes.size) return [];
+  let releases = [];
+  try {
+    const man = await fetchJSON('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json');
+    releases = (man.versions || []).filter(v => v.type === 'release').map(v => v.id);
+  } catch (e) { return []; }
+  // Mojang lists newest first, which is the order we want to present.
+  return releases.filter(id => { const p = neoforgePrefixFor(id); return p && prefixes.has(p); });
+}
+
+ipcMain.handle('get-neoforge-versions', async () => {
+  try { return { ok: true, versions: await neoforgeMcVersions(await fetchNeoForgeVersions()) }; }
+  catch (e) { return { ok: false, versions: [], error: e.message }; }
+});
+
+async function installNeoForge(serverId, installDir, version) {
+  log(serverId, 'info', `Fetching NeoForge version list for MC ${version}...`);
+  const all = await fetchNeoForgeVersions();
+  if (!all.length) throw new Error('Could not reach the NeoForge version list');
+
+  let mcVer = version;
+  if (!mcVer || mcVer === 'latest') mcVer = (await neoforgeMcVersions(all))[0];
+  const prefix = neoforgePrefixFor(mcVer);
+  if (!prefix) throw new Error(`Not a Minecraft version: ${mcVer}`);
+
+  // Prefer stable; fall back to beta only if that is genuinely all there is.
+  const matching = all.filter(v => v.startsWith(prefix));
+  const stable   = matching.filter(v => !/beta|alpha|rc/i.test(v));
+  const pick     = (stable.length ? stable : matching).pop();
+  if (!pick) {
+    const supported = (await neoforgeMcVersions(all)).slice(0, 6).join(', ');
+    throw new Error(`NeoForge has no build for Minecraft ${mcVer}. It starts at 1.20.2 — try one of: ${supported}`);
+  }
+
+  const installerUrl  = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${pick}/neoforge-${pick}-installer.jar`;
+  const installerPath = path.join(installDir, 'neoforge-installer.jar');
+  log(serverId, 'info', `Downloading NeoForge ${pick} installer...`);
+  await downloadFile(installerUrl, installerPath, pct => {
+    emit('console-progress', { serverId, text: `Downloading NeoForge ${pick}... ${pct}%` });
+  });
+
+  log(serverId, 'info', 'Running NeoForge installer (this may take a minute)...');
+  const srv = appData.servers.find(s => s.installDir === installDir);
+  const javaExe = await ensureJava(serverId, srv?.mcVersion || mcVer);
+  await new Promise((resolve, reject) => {
+    const proc = spawn(javaExe, ['-jar', installerPath, '--installServer'], { cwd: installDir });
+    proc.stdout.on('data', d => log(serverId, 'dim', d.toString().trim()));
+    proc.stderr.on('data', d => log(serverId, 'dim', d.toString().trim()));
+    proc.on('close', code => code === 0 ? resolve() : reject(new Error(`NeoForge installer exited ${code}`)));
+    proc.on('error', err => reject(new Error(`Java error: ${err.message}`)));
+  });
+
+  // Same as Forge: the installer leaves a run.bat that sets up the module path.
+  const runBat = path.join(installDir, 'run.bat');
+  if (fs.existsSync(runBat)) {
+    const s2 = appData.servers.find(s => s.installDir === installDir);
+    if (s2) { s2.execPath = runBat; s2.useShell = true; }
+  }
+  log(serverId, 'success', `✔ NeoForge ${pick} installed (Minecraft ${mcVer}).`);
+  return mcVer;
 }
 
 async function installForge(serverId, installDir, version) {
@@ -4149,8 +4248,8 @@ ipcMain.handle('install-mod-with-deps', async (e, { serverId, projectId }) => {
 ipcMain.handle('install-modpack', async (e, { serverId, projectId }) => {
   const server = appData.servers.find(s => s.id === serverId);
   if (!server?.installDir) return { ok: false, error: 'Server not found' };
-  if (!['paper', 'fabric', 'forge', 'quilt'].includes(server.mcType)) {
-    return { ok: false, error: 'Install modpacks onto a modded server (Fabric/Forge/Quilt/Paper).' };
+  if (!['paper', 'fabric', 'forge', 'neoforge', 'quilt'].includes(server.mcType)) {
+    return { ok: false, error: 'Install modpacks onto a modded server (Fabric/Forge/NeoForge/Quilt/Paper).' };
   }
   const loader = server.mcType === 'quilt' ? 'quilt' : server.mcType;
   const gv = server.mcVersion;

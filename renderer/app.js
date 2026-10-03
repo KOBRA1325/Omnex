@@ -2937,6 +2937,8 @@ async function loadMcVersions() {
     else if (selectedMcType==='paper')   versions = unwrap(await window.nexus.getPaperVersions());
     else if (selectedMcType==='fabric')  versions = unwrap(await window.nexus.getFabricVersions());
     else if (selectedMcType==='forge')   versions = unwrap(await window.nexus.getForgeVersions());
+    // NeoForge only exists from MC 1.20.2 onward, so it has its own list.
+    else if (selectedMcType==='neoforge') versions = unwrap(await window.nexus.getNeoForgeVersions());
     else { sel.innerHTML='<option value="latest">Latest</option>'; return; }
     const opts = ['<option value="latest">Latest</option>']
       .concat(versions.slice(0,30).map(v=>`<option value="${v}">${v}</option>`));
@@ -3129,9 +3131,55 @@ async function searchMods(){
   try {
     const loader = s.mcType==='quilt' ? 'quilt' : s.mcType;
     const result=await window.nexus.searchModrinth({query:q, loader, gameVersion:s.mcVersion, sort, category:modActiveCat, limit:30, projectType:modBrowseType});
-    if(!result.hits?.length){grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">No mods found. Try another search or category.</div>';return;}
+    if(!result.hits?.length){ await renderModSearchEmpty(grid, q, loader, s); return; }
     grid.innerHTML=result.hits.map(modCardHtml).join('');
   } catch(e){grid.innerHTML='<div class="empty-msg-sm" style="padding:20px">Search failed.</div>';}
+}
+
+// Work out WHY a search came back empty by relaxing one facet at a time, so we
+// can name the filter that actually excluded things instead of blaming the query.
+async function renderModSearchEmpty(grid, q, loader, s) {
+  const what = modBrowseType === 'modpack' ? 'modpacks' : 'mods';
+  const say = (msg) => { grid.innerHTML = `<div class="empty-msg-sm" style="padding:20px;line-height:1.7">${msg}</div>`; };
+  say('No ' + escapeHtml(what) + ' found. Checking why…');
+  try {
+    const base = { query:q, sort:"relevance", category:modActiveCat, limit:5, projectType:modBrowseType };
+    // Drop the loader, keep the version.
+    const noLoader  = await window.nexus.searchModrinth({ ...base, gameVersion:s.mcVersion });
+    // Drop the version, keep the loader.
+    const noVersion = await window.nexus.searchModrinth({ ...base, loader });
+    const hitsNoLoader  = noLoader?.hits?.length  || 0;
+    const hitsNoVersion = noVersion?.hits?.length || 0;
+    const names = (r) => (r?.hits || []).slice(0,3).map(h => escapeHtml(h.title)).join(", ");
+
+    if (hitsNoLoader && !hitsNoVersion) {
+      say(`No <b>${escapeHtml(loader)}</b> ${escapeHtml(what)} for Minecraft <b>${escapeHtml(s.mcVersion||"?")}</b>.<br>` +
+          `There are results for ${escapeHtml(s.mcVersion||"this version")} on another loader: ${names(noLoader)}.<br>` +
+          `<span style="color:var(--text-dim)">Many modern mods publish for NeoForge rather than Forge. A server of the matching type would find them.</span>`);
+    } else if (hitsNoVersion && !hitsNoLoader) {
+      say(`No ${escapeHtml(what)} for Minecraft <b>${escapeHtml(s.mcVersion||"?")}</b>.<br>` +
+          `${escapeHtml(loader)} results do exist on other versions: ${names(noVersion)}.<br>` +
+          `<span style="color:var(--text-dim)">This server is pinned to ${escapeHtml(s.mcVersion||'its version')}; a server on a supported version would find them.</span>`);
+    } else if (hitsNoLoader && hitsNoVersion) {
+      // Both relaxations have hits, so the project exists but not for this pair.
+      // The usual reason on modern versions is that it moved to NeoForge, so
+      // check that specifically rather than leaving the user to guess.
+      let sibling = "";
+      const other = loader === "forge" ? "neoforge" : (loader === "neoforge" ? "forge" : "");
+      if (other) {
+        try {
+          const alt = await window.nexus.searchModrinth({ ...base, loader: other, gameVersion: s.mcVersion });
+          if (alt?.hits?.length) sibling = `<br><b>${escapeHtml(other)}</b> has it for ${escapeHtml(s.mcVersion||"this version")}: ${names(alt)}.`;
+        } catch (err) {}
+      }
+      say(`Nothing matches <b>${escapeHtml(loader)}</b> <i>and</i> Minecraft <b>${escapeHtml(s.mcVersion||"?")}</b> together.` + sibling +
+          `<br><span style="color:var(--text-dim)">Each filter on its own has results, so it exists — just not built for this combination.</span>`);
+    } else {
+      say(`No ${escapeHtml(what)} found` + (q ? ` for “${escapeHtml(q)}”` : '') + `.<br><span style="color:var(--text-dim)">Try another search or category.</span>`);
+    }
+  } catch(e) {
+    say('No ' + escapeHtml(what) + ' found. Try another search or category.');
+  }
 }
 
 function modCardHtml(mod){

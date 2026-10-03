@@ -161,6 +161,7 @@ contextBridge.exposeInMainWorld('nexus', {
 
   // Mod manager
   searchModrinth:        (opts)   => ipcRenderer.invoke('search-modrinth', opts),
+  getNeoForgeVersions:   ()       => ipcRenderer.invoke('get-neoforge-versions'),
   getModrinthVersions:   (opts)   => ipcRenderer.invoke('get-modrinth-versions', opts),
   getModrinthProject:    (id)     => ipcRenderer.invoke('get-modrinth-project', id),
   installMod:            (opts)   => ipcRenderer.invoke('install-mod', opts),
