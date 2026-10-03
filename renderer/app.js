@@ -865,6 +865,9 @@ function renderDashboard() {
     </div>`;
   }).join('');
 }
+// Selecting a server and showing the server view are separate on purpose: startup
+// pre-selects a server while deliberately staying on the dashboard. Anything the
+// user clicks to OPEN a server must therefore go through this, not selectServer.
 function openServerDash(id) { showView('servers'); selectServer(id); }
 async function dashAction(e, action, id) {
   e.stopPropagation();
@@ -996,7 +999,7 @@ function sidebarItemHtml(s) {
     : (g ? (g.icon ? `<img src="${g.icon}" alt="${s.game}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><span class="server-fallback" style="display:none">${g.fallback}</span>` : `<span>${g.fallback||s.game[0]}</span>`) : `<span>${s.game[0]}</span>`);
   const colorStyle = s.color ? ` style="box-shadow: inset 3px 0 0 ${escapeHtml(s.color)}"` : '';
   return `<div class="server-item ${s.id===activeId?'active':''}" draggable="true" data-id="${s.id}"${colorStyle}
-      onclick="selectServer('${s.id}')" oncontextmenu="showServerContextMenu(event, '${s.id}')"
+      onclick="openServerDash('${s.id}')" oncontextmenu="showServerContextMenu(event, '${s.id}')"
       ondragstart="sbDragStart(event,'${s.id}')" ondragend="sbDragEnd(event)" ondragover="sbDragOver(event)" ondragleave="sbDragLeave(event)" ondrop="sbDrop(event,'${s.id}')">
     <div class="server-item-icon">${iconHtml}</div>
     <div class="server-item-info">
