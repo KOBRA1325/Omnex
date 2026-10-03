@@ -9,6 +9,10 @@ out/
 *.msi
 *.zip
 
+# Release staging — hyphenated copies of the installer, made per release and
+# uploaded to GitHub by hand. Regenerated from dist/, so never worth committing.
+upload-v*/
+
 # Electron cache
 .electron-cache/
 
