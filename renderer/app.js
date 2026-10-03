@@ -3781,7 +3781,7 @@ function renderAntistasiModList(mods){
 function toggleWorkshopMod(id,name,required,btn){
   const idx=workshopSelectedMods.findIndex(m=>m.id===id);
   if(idx>=0){if(required){showToast('⚠️',`${name} is required`);return;}workshopSelectedMods.splice(idx,1);btn.classList.remove('on');btn.textContent='';}
-  else{workshopSelectedMods.push({id,name,required});btn.classList.add('on');btn.textContent='✓';}
+  else{workshopSelectedMods.push({id,name,required,side:workshopSideOf(id)});btn.classList.add('on');btn.textContent='✓';}
   updateLaunchLine();
 }
 function selectAllRequiredMods(){
@@ -3794,25 +3794,42 @@ function selectAllRequiredMods(){
   });
   updateLaunchLine();
 }
+// Keys-only mods are installed purely so the server trusts their signature;
+// they are never passed to -mod=. That is how a player runs extra visual mods
+// without the server loading them, and without lowering verifySignatures.
+let _customModKeysOnly = false;
+function toggleCustomModKeysOnly(btn) {
+  _customModKeysOnly = !_customModKeysOnly;
+  btn.classList.toggle('on', _customModKeysOnly);
+  const val = btn.querySelector('.cfg-bool-val');
+  if (val) val.textContent = _customModKeysOnly ? 'ON' : 'OFF';
+}
+
 function addCustomMod(){
   const id=document.getElementById('customModId')?.value.trim();
   const name=document.getElementById('customModName')?.value.trim()||`Mod_${id}`;
   if(!id){showToast('⚠️','Enter a Workshop mod ID');return;}
   if(workshopSelectedMods.some(m=>m.id===id)){showToast('⚠️','Mod already in list');return;}
-  workshopSelectedMods.push({id,name,required:false});
+  const side = _customModKeysOnly ? 'client' : 'server';
+  workshopSelectedMods.push({id,name,required:false,side});
   const list=document.getElementById('antistasiModList');
   if(list) list.innerHTML+=`<div class="workshop-mod-item"><button class="workshop-mod-check on" onclick="toggleWorkshopMod('${id}','${name}',false,this)">✓</button>
-    <div class="workshop-mod-info"><div class="workshop-mod-name">${escapeHtml(name)} <span class="workshop-mod-tag" style="background:rgba(0,229,255,0.1);color:var(--accent)">Custom</span></div>
+    <div class="workshop-mod-info"><div class="workshop-mod-name">${escapeHtml(name)} <span class="workshop-mod-tag" style="background:rgba(0,229,255,0.1);color:var(--accent)">Custom</span>${side === 'client' ? ' <span class="workshop-mod-tag">keys only</span>' : ''}</div>
     <div class="workshop-mod-id">ID: ${id}</div></div></div>`;
   document.getElementById('customModId').value=''; document.getElementById('customModName').value='';
-  updateLaunchLine(); showToast('✅',`Added: ${name}`);
+  updateLaunchLine();
+  showToast('✅', side === 'client' ? `Added: ${name} (keys only)` : `Added: ${name}`);
 }
 // Side lookup for the pack currently shown, so the preview can tell which
 // mods the server will actually load.
 let _workshopPack = [];
 function workshopSideOf(id){
+  // A mod selected with an explicit side (custom or imported) wins over the
+  // pack table; anything unknown loads server-side, matching main.js.
+  const sel=workshopSelectedMods.find(m=>String(m.id)===String(id));
+  if(sel&&sel.side) return sel.side;
   const hit=_workshopPack.find(m=>String(m.id)===String(id));
-  return (hit&&hit.side)||'server';  // unknown mods load server-side, as main.js does
+  return (hit&&hit.side)||'server';
 }
 function updateLaunchLine(){
   const line=document.getElementById('workshopLaunchLine'); if(!line) return;
@@ -3855,8 +3872,9 @@ function importArma3Preset() {
           // Add all mods to the custom mod list
           for (const mod of result.mods) {
             if (!workshopCustomMods.find(m => m.id === mod.id)) {
-              workshopCustomMods.push(mod);
-              workshopSelectedMods.push(mod);
+              const entry = { ...mod, side: _customModKeysOnly ? 'client' : 'server' };
+              workshopCustomMods.push(entry);
+              workshopSelectedMods.push(entry);
             }
           }
           renderWorkshopMods();

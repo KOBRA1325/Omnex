@@ -1369,6 +1369,15 @@
             style="font-size:11px; max-width:140px;pointer-events:all" />
           <button class="btn-browse" onclick="addCustomMod()">Add</button>
         </div>
+        <!-- Keys-only: the server installs the mod purely to harvest its .bikey,
+             so players running it can connect without the server loading it. -->
+        <div style="display:flex; align-items:center; gap:7px; margin-top:6px">
+          <button class="cfg-bool-btn" id="customModKeysOnly" onclick="toggleCustomModKeysOnly(this)"
+            title="Install the mod only to trust its signature, so players can run it without the server loading it. Use this for visual and audio mods.">
+            <span class="cfg-bool-track"><span class="cfg-bool-thumb"></span></span><span class="cfg-bool-val">OFF</span>
+          </button>
+          <span style="font-size:11px; color:var(--text-dim)">Keys only &mdash; don’t load on the server</span>
+        </div>
       </div>
 
       <!-- Installed mods -->

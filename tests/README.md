@@ -43,6 +43,7 @@ Two things to know when adding a suite:
 | `arma3-config.test.js` | The `key = value;` parser and writer (class blocks, `motd[]` and comments must survive a write), the generated seed `server.cfg`, and launch args |
 | `arma3-missions.test.js` | Mission discovery from `mpmissions/` and from inside mods, the `class Missions` writer, and the typed-template guard |
 | `arma3-modpack.test.js` | The Antistasi pack's Workshop ids, the server/client split, `.bikey` collection, and `-mod=` construction |
+| `arma3-workshop-ui.test.js` | The launch-line preview matching the real `-mod=`, keys-only custom mods, and the installed panel distinguishing sides |
 | `arma3-keys.test.js` | The signature-key audit's four states, re-sync fixing only the fixable one, and pack mods that never downloaded |
 | `steam-auth.test.js` | SteamCMD output classification for both the Settings login and the install path, including the mobile-approval timeout |
 | `discord-identity.test.js` | Per-server webhook name and avatar, that batching keeps two servers on one webhook apart, and that event colours were left meaning what they mean |
