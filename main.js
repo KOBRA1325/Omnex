@@ -392,6 +392,21 @@ let appData = loadData();
   }
   if (changed) saveData();
 })();
+// Repair servers mislabelled before NeoForge was a supported type. Omnex could
+// not record "neoforge", so a correctly installed NeoForge server had its mcType
+// overwritten by a detector that could only answer forge/fabric — and the mod
+// browser then searched the wrong loader. The neoforged libraries only exist in a
+// real NeoForge install, so this cannot misfire on a genuine Forge/Fabric server.
+(function migrateNeoForgeType() {
+  let changed = false;
+  for (const s of appData.servers || []) {
+    if (s.game !== 'Minecraft' || !s.installDir || s.mcType === 'neoforge') continue;
+    try {
+      if (fs.existsSync(path.join(s.installDir, 'libraries', 'net', 'neoforged'))) { s.mcType = 'neoforge'; changed = true; }
+    } catch (e) {}
+  }
+  if (changed) saveData();
+})();
 const serverProcesses = {};
 
 // ── Window ────────────────────────────────────────────────────────────────────
@@ -4102,7 +4117,11 @@ function detectMcLoader(dir) {
     if (has(/quilt-server-launch.*\.jar/) || exists('.quilt') || exists('libraries', 'org', 'quiltmc')) return 'quilt';
     if (has(/fabric-server-(launch|launcher|mc).*\.jar/) || exists('.fabric') || exists('libraries', 'net', 'fabricmc')) return 'fabric';
     if (has(/paper(mc|-).*\.jar/)) return 'paper';
-    if (exists('run.bat') || exists('libraries', 'net', 'minecraftforge') || exists('libraries', 'net', 'neoforged') || has(/(neo)?forge.*\.jar/)) return 'forge';
+    // NeoForge must be tested before Forge: both leave a run.bat, so the generic
+    // Forge check would swallow a NeoForge install and mislabel the server, which
+    // then searched for mods on the wrong loader.
+    if (exists('libraries', 'net', 'neoforged') || has(/neoforge.*\.jar/)) return 'neoforge';
+    if (exists('run.bat') || exists('libraries', 'net', 'minecraftforge') || has(/forge.*\.jar/)) return 'forge';
     return null;
   } catch (e) { return null; }
 }

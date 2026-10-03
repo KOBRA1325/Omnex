@@ -1430,7 +1430,7 @@ async function selectServer(id) {
       checkJavaStatus(s.id);
       // Backfill the mod loader from the install folder if it wasn't recorded
       // (older installs), so the header + Mods browser know it's Fabric/Forge/etc.
-      if (!['paper','fabric','forge','quilt'].includes(s.mcType)) {
+      if (!['paper','fabric','forge','neoforge','quilt'].includes(s.mcType)) {
         window.nexus.detectMcLoader(s.id).then(r => {
           if (r && r.detected && r.loader && r.loader !== s.mcType && id === activeId) {
             s.mcType = r.loader; renderHeader();
@@ -3048,7 +3048,7 @@ function installSelected(projectId, title, btn){
 }
 async function installModpack(projectId,title,btn){
   const s=getActive(); if(!s) return;
-  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){ showToast('ℹ️','Install modpacks onto a modded server (Fabric/Forge/Quilt/Paper).'); return; }
+  if(!['paper','fabric','forge','neoforge','quilt'].includes(s.mcType)){ showToast('ℹ️','Install modpacks onto a modded server (Fabric/Forge/NeoForge/Quilt/Paper).'); return; }
   if(btn){ btn.disabled=true; btn.textContent='…'; }
   showToast('📦', `Installing ${title}… this can take a minute.`);
   try {
@@ -3070,11 +3070,11 @@ async function openModManager(){
   // FiveM: the "Mods" button opens the RP framework helper.
   if(s.game==='FiveM'){ openFivemFramework(); return; }
   // If the loader wasn't recorded, detect it from the install folder first.
-  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
+  if(!['paper','fabric','forge','neoforge','quilt'].includes(s.mcType)){
     try { const r=await window.nexus.detectMcLoader(s.id); if(r&&r.detected&&r.loader){ s.mcType=r.loader; renderHeader(); } } catch(e){}
   }
-  if(!['paper','fabric','forge','quilt'].includes(s.mcType)){
-    showToast('ℹ️','This is a Vanilla server — mods need a loader. Create a new server with Fabric, Paper, Forge, or Quilt to add mods.');
+  if(!['paper','fabric','forge','neoforge','quilt'].includes(s.mcType)){
+    showToast('ℹ️','This is a Vanilla server — mods need a loader. Create a new server with Fabric, Paper, Forge, NeoForge, or Quilt to add mods.');
     return;
   }
   const title=document.getElementById('modModalTitle'); if(title) title.textContent=`${s.name} · ${s.mcType} ${s.mcVersion||''}`;
