@@ -2939,7 +2939,7 @@ async function testServerWebhook(btn) {
   if (!url) { showToast('⚠️', 'Enter a webhook URL first, or leave blank to use the global one.'); return; }
   const old = btn.textContent; btn.disabled = true; btn.textContent = '…';
   try {
-    const r = await window.nexus.testDiscordWebhook(url);
+    const r = await window.nexus.testDiscordWebhook(url, getActive()?.id);
     showToast(r.ok ? '✅' : '❌', r.ok ? 'Test sent — check that channel.' : (r.error || 'Failed to send.'));
   } catch(e) { showToast('❌', e.message); }
   finally { btn.disabled = false; btn.textContent = old; }

@@ -4705,15 +4705,47 @@ function sendNotification(title, body, urgency = 'normal') {
   } catch(e) {}
 }
 
+// Discord lets a webhook message override the display name and avatar, which is
+// the only way several servers sharing one channel tell themselves apart —
+// otherwise every post reads "Omnex" with a blank avatar and you have to read the
+// title to know which server crashed.
+//
+// The avatar is the game's capsule art already stored on the server record. Only
+// http(s) URLs work: Minecraft's icon is a bundled relative path and FiveM has
+// none, so those fall back to the default webhook avatar rather than breaking the
+// post.
+function serverDiscordIdentity(serverId) {
+  const s = serverId ? appData.servers.find(sv => sv.id === serverId) : null;
+  if (!s) return null;
+  const identity = {};
+  const name = String(s.name || '').trim();
+  if (name) {
+    // Discord rejects any username containing "discord", and caps it at 80.
+    identity.username = name.replace(/discord/gi, 'discørd').slice(0, 80);
+  }
+  for (const candidate of [s.customIcon, s.icon]) {
+    if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) {
+      identity.avatar_url = candidate;
+      break;
+    }
+  }
+  return Object.keys(identity).length ? identity : null;
+}
+
 // Low-level: POST an array of embeds (Discord allows up to 10 per message) to a
 // webhook. Resolves { ok, error } and never throws.
-function postDiscordEmbeds(webhookUrl, embeds) {
+function postDiscordEmbeds(webhookUrl, embeds, identity) {
   return new Promise(resolve => {
     if (!webhookUrl || !/^https:\/\/(discord|discordapp)\.com\/api\/webhooks\//i.test(webhookUrl.trim())) {
       return resolve({ ok: false, error: 'Invalid Discord webhook URL' });
     }
     let payload;
-    try { payload = JSON.stringify({ username: 'Omnex', embeds: (embeds || []).slice(0, 10) }); }
+    try {
+      const body = { username: 'Omnex', embeds: (embeds || []).slice(0, 10) };
+      if (identity && identity.username) body.username = identity.username;
+      if (identity && identity.avatar_url) body.avatar_url = identity.avatar_url;
+      payload = JSON.stringify(body);
+    }
     catch(e) { return resolve({ ok: false, error: 'Failed to build payload' }); }
 
     let u;
@@ -4736,10 +4768,10 @@ function postDiscordEmbeds(webhookUrl, embeds) {
 }
 
 // Post a single rich embed to a Discord webhook. Resolves { ok, error }, never throws.
-function postDiscordWebhook(webhookUrl, { title, description, color, fields }) {
+function postDiscordWebhook(webhookUrl, { title, description, color, fields, serverId }) {
   const embed = { title, description, color: typeof color === 'number' ? color : 0x5865F2, timestamp: new Date().toISOString(), footer: { text: 'Omnex' } };
   if (Array.isArray(fields) && fields.length) embed.fields = fields;
-  return postDiscordEmbeds(webhookUrl, [embed]);
+  return postDiscordEmbeds(webhookUrl, [embed], serverDiscordIdentity(serverId));
 }
 
 // ── Live activity → Discord (the "your server is alive" feed) ────────────────
@@ -4759,15 +4791,20 @@ function flushDiscordQueue() {
   // Group pending embeds by destination webhook so each channel gets one message —
   // multi-server users may route each server to a different channel. Cap 10 embeds
   // per message (Discord's limit); anything over stays queued for the next flush.
-  const byUrl = new Map();
-  for (const { url, embed } of _discordQueue) {
-    if (!byUrl.has(url)) byUrl.set(url, []);
-    byUrl.get(url).push(embed);
+  // Keyed by webhook AND server: Discord applies the username/avatar per
+  // message, so merging two servers that share a channel into one message
+  // would post both under whichever identity won.
+  const byTarget = new Map();
+  for (const item of _discordQueue) {
+    const key = item.url + '\u0000' + (item.serverId || '');
+    if (!byTarget.has(key)) byTarget.set(key, []);
+    byTarget.get(key).push(item);
   }
   const overflow = [];
-  for (const [url, embeds] of byUrl) {
-    postDiscordEmbeds(url, embeds.slice(0, 10)).catch(() => {});
-    for (const embed of embeds.slice(10)) overflow.push({ url, embed });
+  for (const items of byTarget.values()) {
+    const { url, serverId } = items[0];
+    postDiscordEmbeds(url, items.slice(0, 10).map(i => i.embed), serverDiscordIdentity(serverId)).catch(() => {});
+    for (const item of items.slice(10)) overflow.push(item);
   }
   _discordQueue = overflow;
   if (_discordQueue.length) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000);
@@ -4788,7 +4825,7 @@ function forwardActivityToDiscord(serverId, kind, text, player) {
     timestamp: new Date().toISOString(),
   };
   if (player) embed.author.icon_url = `https://mc-heads.net/avatar/${encodeURIComponent(player)}/32`;
-  _discordQueue.push({ url, embed });
+  _discordQueue.push({ url, embed, serverId });
   if (_discordQueue.length >= 10) flushDiscordQueue();
   else if (!_discordFlushTimer) _discordFlushTimer = setTimeout(flushDiscordQueue, 2000);
 }
@@ -4822,17 +4859,23 @@ function notify(event, { title, body, fields, urgency = 'normal', serverId }) {
   const url = serverDiscordWebhook(serverId);
   if (appSettings.discordEnabled && url) {
     postDiscordWebhook(url, {
-      title, description: body, color: NOTIFY_COLORS[event], fields,
+      title, description: body, color: NOTIFY_COLORS[event], fields, serverId,
     }).catch(() => {});
   }
 }
 
-ipcMain.handle('test-discord-webhook', async (e, url) => {
+ipcMain.handle('test-discord-webhook', async (e, url, serverId) => {
   const webhook = (url && url.trim()) || appSettings.discordWebhookUrl;
+  // When testing a particular server, post as that server so the message
+  // previews exactly how its events will look.
+  const s = serverId ? appData.servers.find(sv => sv.id === serverId) : null;
   return postDiscordWebhook(webhook, {
-    title: '✅ Omnex connected',
-    description: 'This is a test message. Your Discord webhook is working — Omnex will post server events here.',
+    title: s ? `✅ ${s.name} connected` : '✅ Omnex connected',
+    description: s
+      ? `This is a test message. ${s.name} will post its ${s.game} events to this channel.`
+      : 'This is a test message. Your Discord webhook is working — Omnex will post server events here.',
     color: NOTIFY_COLORS.start,
+    serverId,
   });
 });
 

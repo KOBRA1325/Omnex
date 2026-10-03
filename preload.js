@@ -140,7 +140,7 @@ contextBridge.exposeInMainWorld('nexus', {
   getSettings:        ()         => ipcRenderer.invoke('get-settings'),
   saveSettings:       (settings) => ipcRenderer.invoke('save-settings', settings),
   onSettingsChanged:  (cb)       => ipcRenderer.on('settings-changed', (_, d) => cb(d)),
-  testDiscordWebhook: (url)      => ipcRenderer.invoke('test-discord-webhook', url),
+  testDiscordWebhook: (url, serverId) => ipcRenderer.invoke('test-discord-webhook', url, serverId),
   setServerWebhook:   (id, url)  => ipcRenderer.invoke('set-server-webhook', id, url),
   setServerAllowlist: (id, ids)  => ipcRenderer.invoke('set-server-allowlist', id, ids),
   setServerAppearance:(id, ap)   => ipcRenderer.invoke('set-server-appearance', id, ap),

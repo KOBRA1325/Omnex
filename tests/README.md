@@ -45,6 +45,7 @@ Two things to know when adding a suite:
 | `arma3-modpack.test.js` | The Antistasi pack's Workshop ids, the server/client split, `.bikey` collection, and `-mod=` construction |
 | `arma3-keys.test.js` | The signature-key audit's four states, re-sync fixing only the fixable one, and pack mods that never downloaded |
 | `steam-auth.test.js` | SteamCMD output classification for both the Settings login and the install path, including the mobile-approval timeout |
+| `discord-identity.test.js` | Per-server webhook name and avatar, that batching keeps two servers on one webhook apart, and that event colours were left meaning what they mean |
 | `arma-reforger.test.js` | Nested-JSON config get/set and type coercion, the generated `server.json`, launch args, scenario-id parsing and the write guard |
 | `minecraft-neoforge.test.js` | NeoForge ↔ Minecraft version mapping (both the `1.21.1` and `26.3` schemes), version-list derivation, and the mod-search empty state that names the responsible filter |
 | `minecraft-loader-detect.test.js` | Detecting vanilla/paper/fabric/quilt/forge/neoforge from an install folder, and that NeoForge is tested before Forge |
