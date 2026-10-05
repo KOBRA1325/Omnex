@@ -32,6 +32,9 @@ Two things to know when adding a suite:
 - **`grab` skips strings, comments and regex literals** when counting braces. It
   has to: `armaCfgDepth`'s body is literally `if (ch === '{') depth++;`, and
   `patchArmaCfg` contains `replace(/"/g, '')`. Both defeat a naive counter.
+- **`grab` cannot start at a destructured parameter.** `ipcMain.handle('x', async (e, { id }) => …)`
+  matches the `{ id }` braces, not the body — slice such handlers by their closing
+  line instead.
 - **End with `report(state)`.** It fails a suite that ran *zero* assertions. That
   guard exists because an editing mistake once left three suites gutted but still
   exiting 0, and the runner reported them as passing.
@@ -46,6 +49,7 @@ Two things to know when adding a suite:
 | `arma3-workshop-ui.test.js` | The launch-line preview matching the real `-mod=`, keys-only custom mods, and the installed panel distinguishing sides |
 | `arma3-keys.test.js` | The signature-key audit's four states, re-sync fixing only the fixable one, and pack mods that never downloaded |
 | `steam-auth.test.js` | SteamCMD output classification for both the Settings login and the install path, including the mobile-approval timeout |
+| `mrpack-export.test.js` | The hand-written zip container (extracted with PowerShell to prove it is a real archive), crc32, loader-version detection, and the index shape |
 | `discord-identity.test.js` | Per-server webhook name and avatar, that batching keeps two servers on one webhook apart, and that event colours were left meaning what they mean |
 | `arma-reforger.test.js` | Nested-JSON config get/set and type coercion, the generated `server.json`, launch args, scenario-id parsing and the write guard |
 | `minecraft-neoforge.test.js` | NeoForge ↔ Minecraft version mapping (both the `1.21.1` and `26.3` schemes), version-list derivation, and the mod-search empty state that names the responsible filter |

@@ -3136,6 +3136,27 @@ async function refreshInstalledProjects(){
   try { modInstalledProjects = new Set(await window.nexus.getModProjects(s.id)); } catch(e){ modInstalledProjects=new Set(); }
 }
 
+// Export the installed mods as a Modrinth .mrpack. Mods Omnex installed from
+// Modrinth become download links; anything else is bundled into the pack so the
+// export is never quietly incomplete.
+async function exportModpack() {
+  const s = getActive(); if (!s) return;
+  const btn = document.getElementById('btnExportPack');
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Exporting…'; }
+  try {
+    const r = await window.nexus.exportModpack(s.id);
+    if (r && r.ok) {
+      const total = r.linked + r.bundled;
+      const extra = r.bundled ? ` (${r.bundled} bundled in)` : '';
+      showToast('✅', `Exported ${total} mod${total !== 1 ? 's' : ''}${extra}`);
+    } else if (!r || !r.canceled) {
+      showToast('❌', (r && r.error) || 'Export failed');
+    }
+  } catch (e) { showToast('❌', e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
+}
+
 async function renderInstalledMods(){
   const s=getActive(); if(!s) return;
   const list=document.getElementById('installedModList'); if(!list) return;

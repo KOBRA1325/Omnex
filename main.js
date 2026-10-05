@@ -4275,6 +4275,197 @@ ipcMain.handle('install-mod-with-deps', async (e, { serverId, projectId }) => {
   } catch (err) { return { ok: false, error: err.message, installed, deps }; }
 });
 
+// ── Export a Modrinth modpack (.mrpack) ──────────────────────────────────────
+// A .mrpack is a zip holding modrinth.index.json plus an optional overrides/
+// tree. Omnex already records which Modrinth project and version each installed
+// mod came from, so the index can be rebuilt exactly; anything it does not
+// recognise (a hand-dropped jar, or one from elsewhere) is embedded under
+// overrides/ so the export never silently loses a mod.
+//
+// The zip is written here rather than shelled out to PowerShell's
+// Compress-Archive: zip entry names must use forward slashes for the Modrinth
+// app and Prism to read them, and that is not worth leaving to chance.
+const zlib = require('zlib');
+
+const CRC_TABLE = (() => {
+  const t = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = -1;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+
+// entries: [{ name, data }] — name always uses '/' separators.
+function zipBuffer(entries) {
+  const parts = [], central = [];
+  let offset = 0;
+  for (const { name, data } of entries) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const comp = zlib.deflateRawSync(data, { level: 9 });
+    const crc = crc32(data);
+
+    const lfh = Buffer.alloc(30);
+    lfh.writeUInt32LE(0x04034b50, 0);
+    lfh.writeUInt16LE(20, 4);        // version needed to extract
+    lfh.writeUInt16LE(0x0800, 6);    // UTF-8 filenames
+    lfh.writeUInt16LE(8, 8);         // deflate
+    lfh.writeUInt32LE(crc, 14);
+    lfh.writeUInt32LE(comp.length, 18);
+    lfh.writeUInt32LE(data.length, 22);
+    lfh.writeUInt16LE(nameBuf.length, 26);
+    parts.push(lfh, nameBuf, comp);
+
+    const cdh = Buffer.alloc(46);
+    cdh.writeUInt32LE(0x02014b50, 0);
+    cdh.writeUInt16LE(20, 4);
+    cdh.writeUInt16LE(20, 6);
+    cdh.writeUInt16LE(0x0800, 8);
+    cdh.writeUInt16LE(8, 10);
+    cdh.writeUInt32LE(crc, 16);
+    cdh.writeUInt32LE(comp.length, 20);
+    cdh.writeUInt32LE(data.length, 24);
+    cdh.writeUInt16LE(nameBuf.length, 28);
+    cdh.writeUInt32LE(offset, 42);
+    central.push(cdh, nameBuf);
+
+    offset += lfh.length + nameBuf.length + comp.length;
+  }
+  const cd = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cd.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cd, eocd]);
+}
+
+// Modrinth names the loader dependency differently from Omnex's mcType.
+const MRPACK_LOADER_KEY = { fabric: 'fabric-loader', quilt: 'quilt-loader', forge: 'forge', neoforge: 'neoforge' };
+
+// The loader's own version is not recorded at install time, so read it back off
+// disk. Best effort: an export without it still imports, the user just picks the
+// loader build themselves.
+function detectLoaderVersion(server) {
+  const dir = server.installDir;
+  const firstDir = (...p) => {
+    try { return fs.readdirSync(path.join(dir, ...p), { withFileTypes: true }).filter(d => d.isDirectory())[0]?.name || null; }
+    catch (e) { return null; }
+  };
+  if (server.mcType === 'neoforge') return firstDir('libraries', 'net', 'neoforged', 'neoforge');
+  if (server.mcType === 'forge') {
+    const v = firstDir('libraries', 'net', 'minecraftforge', 'forge');
+    // Forge stores <mc>-<loader>; the pack wants just the loader part.
+    return v ? (v.split('-')[1] || v) : null;
+  }
+  if (server.mcType === 'fabric' || server.mcType === 'quilt') {
+    const vendor = server.mcType === 'fabric' ? ['net', 'fabricmc', 'fabric-loader'] : ['org', 'quiltmc', 'quilt-loader'];
+    return firstDir('libraries', ...vendor);
+  }
+  return null;
+}
+
+ipcMain.handle('export-modpack', async (e, { serverId }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server?.installDir) return { ok: false, error: 'Server not found' };
+  if (server.game !== 'Minecraft') return { ok: false, error: 'Modpack export is for Minecraft servers.' };
+  const loaderKey = MRPACK_LOADER_KEY[server.mcType];
+  if (!loaderKey) {
+    return { ok: false, error: `A .mrpack needs a mod loader — this server is ${server.mcType || 'vanilla'}.` };
+  }
+
+  const modsDir = modsDirFor(server);
+  let onDisk = [];
+  try { onDisk = fs.readdirSync(modsDir).filter(f => f.toLowerCase().endsWith('.jar')); } catch (err) {
+    return { ok: false, error: 'No mods folder — install a mod first.' };
+  }
+  if (!onDisk.length) return { ok: false, error: 'No mods installed to export.' };
+
+  // filename -> projectId, so a jar on disk can be matched back to its project.
+  const byFilename = new Map();
+  for (const [pid, filename] of Object.entries(server.modProjects || {})) byFilename.set(filename, pid);
+
+  const files = [], overrides = [], unresolved = [];
+  for (const filename of onDisk) {
+    const pid = byFilename.get(filename);
+    const versionId = pid && server.modVersions ? server.modVersions[pid] : null;
+    let entry = null;
+    if (versionId) {
+      // Ask Modrinth for the hashes and URL this version actually ships with,
+      // rather than trusting anything cached locally.
+      try {
+        const v = await fetchJSON(`https://api.modrinth.com/v2/version/${encodeURIComponent(versionId)}`);
+        const f = (v.files || []).find(x => x.filename === filename) || (v.files || []).find(x => x.primary) || (v.files || [])[0];
+        if (f && f.hashes && f.url) {
+          entry = {
+            path: `mods/${filename}`,
+            hashes: { sha1: f.hashes.sha1, sha512: f.hashes.sha512 },
+            env: { client: 'required', server: 'required' },
+            downloads: [f.url],
+            fileSize: f.size,
+          };
+        }
+      } catch (err) { /* fall through to an override */ }
+    }
+    if (entry) files.push(entry);
+    else {
+      // No Modrinth record, or the lookup failed: ship the jar itself so the
+      // pack is still complete.
+      try {
+        overrides.push({ name: `overrides/mods/${filename}`, data: fs.readFileSync(path.join(modsDir, filename)) });
+        unresolved.push(filename);
+      } catch (err) { /* unreadable file — skip it rather than fail the export */ }
+    }
+  }
+
+  const loaderVersion = detectLoaderVersion(server);
+  const dependencies = { minecraft: server.mcVersion || 'unknown' };
+  if (loaderVersion) dependencies[loaderKey] = loaderVersion;
+
+  const index = {
+    formatVersion: 1,
+    game: 'minecraft',
+    versionId: new Date().toISOString().slice(0, 10),
+    name: server.name || 'Omnex pack',
+    summary: `Exported from Omnex — ${server.mcType} ${server.mcVersion || ''}`.trim(),
+    files,
+    dependencies,
+  };
+
+  const safeName = String(server.name || 'modpack').replace(/[^A-Za-z0-9 ._-]/g, '').trim() || 'modpack';
+  const res = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export modpack',
+    defaultPath: `${safeName} ${server.mcVersion || ''}`.trim() + '.mrpack',
+    filters: [{ name: 'Modrinth modpack', extensions: ['mrpack'] }],
+  });
+  if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+
+  try {
+    const zip = zipBuffer([
+      { name: 'modrinth.index.json', data: Buffer.from(JSON.stringify(index, null, 2), 'utf8') },
+      ...overrides,
+    ]);
+    fs.writeFileSync(res.filePath, zip);
+  } catch (err) {
+    return { ok: false, error: 'Could not write the pack: ' + err.message };
+  }
+
+  log(serverId, 'success', `✔ Exported ${files.length + unresolved.length} mod${files.length + unresolved.length !== 1 ? 's' : ''} to ${path.basename(res.filePath)}`);
+  if (unresolved.length) {
+    log(serverId, 'info', `${unresolved.length} mod${unresolved.length !== 1 ? 's were' : ' was'} bundled into the pack directly (not from Modrinth): ${unresolved.slice(0, 5).join(', ')}${unresolved.length > 5 ? '…' : ''}`);
+  }
+  if (!loaderVersion) log(serverId, 'warn', 'Could not read the loader version from disk — whoever imports the pack picks it.');
+
+  return { ok: true, path: res.filePath, linked: files.length, bundled: unresolved.length, loaderVersion };
+});
+
 // Install a Modrinth modpack (.mrpack) onto a server: download the pack, unzip it,
 // pull every server-side file to its path, and copy the overrides in. The version is
 // resolved for THIS server's loader+version, so it's compatible by construction.

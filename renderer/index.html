@@ -698,7 +698,13 @@
         <div class="empty-msg-sm" style="padding:20px">Search Modrinth, or pick a category to browse.</div>
       </div>
       <div class="mod-installed-col">
-        <div class="config-group-label" style="margin:0">📦 Installed <span id="installedModCount" style="color:var(--text-dim); font-weight:400"></span></div>
+        <div class="config-group-label" style="margin:0; display:flex; align-items:center; gap:8px">
+          📦 Installed <span id="installedModCount" style="color:var(--text-dim); font-weight:400"></span>
+          <!-- Exports a Modrinth .mrpack: the mod list as download links, plus any
+               jar Omnex cannot trace back to Modrinth bundled in directly. -->
+          <button class="btn-storage-action" id="btnExportPack" style="margin-left:auto" onclick="exportModpack()"
+            title="Save this server’s mods as a .mrpack you can import into Omnex, the Modrinth app or Prism">⬆ Export .mrpack</button>
+        </div>
         <div class="mod-installed-list" id="installedModList">
           <div class="empty-msg-sm">Loading…</div>
         </div>
