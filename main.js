@@ -21,13 +21,30 @@ fs.mkdirSync(STEAMCMD_DIR, { recursive: true });
 
 
 // ── Java management ───────────────────────────────────────────────────────────
-// Java version requirements per Minecraft version range
+// Which Java major each Minecraft version needs.
+//
+// Minecraft states this itself, in its version metadata (javaVersion.majorVersion);
+// this table mirrors it. Getting it right matters more than it looks: a newer JRE
+// is NOT a safe substitute for a modded server, because mods pin the major
+// exactly — Fabric's `depends java @ [21]` means 21.x, so Java 25 is rejected and
+// the server dies on startup with "Incompatible mods found!".
+//
+//   <=1.16.x -> 8 · 1.17.x -> 17 · 1.18-1.20.4 -> 17 · 1.20.5-1.21.x -> 21 · 26+ -> 25
+//
+// (1.17 asks for 16, which Adoptium no longer ships a current build of; 17 runs it
+// and is what the Fabric/Forge ecosystem settled on.)
 function getRequiredJavaVersion(mcVersion) {
-  // Use Java 25 — the current LTS and what the latest Minecraft requires (its
-  // bundler is now compiled for Java 25 / class file 69). Java 25 also runs the
-  // older modern versions Omnex supports, so it's a safe single default.
-  // Never download Java 8/17 as modern MC won't start on them.
-  return 25;
+  const m = String(mcVersion == null ? '' : mcVersion).trim().match(/^(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!m) return 21;                       // unknown ("latest" before it resolves): 21 covers 1.20.5-1.21.x
+  const major = parseInt(m[1], 10);
+  const minor = parseInt(m[2] || '0', 10);
+  const patch = parseInt(m[3] || '0', 10);
+  // Minecraft dropped the leading "1." in 2026 — 26.x and later ship on Java 25.
+  if (major !== 1) return major >= 26 ? 25 : 21;
+  if (minor >= 21) return 21;
+  if (minor === 20) return patch >= 5 ? 21 : 17;  // 1.20.5 is where the game moved to 21
+  if (minor >= 17) return 17;
+  return 8;
 }
 
 async function getJavaDownloadUrl(javaVersion, serverId) {
@@ -56,26 +73,40 @@ async function getJavaDownloadUrl(javaVersion, serverId) {
   return fallbacks[javaVersion] || fallbacks[25];
 }
 
-// Check if system Java meets the required version
-async function getSystemJava(requiredVersion) {
+// Ask a JRE which major version it is. Directory names lie (Adoptium has changed
+// its layout before, and an imported server's JRE can be anything), so read it
+// from the binary rather than from the path.
+function javaMajorOf(exe) {
   return new Promise(resolve => {
-    const p = spawn('java', ['-version'], { shell: true });
+    let p;
+    try { p = spawn(exe, ['-version'], { shell: exe === 'java' }); }
+    catch (e) { return resolve(null); }
     let output = '';
+    let settled = false;
+    const done = v => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
+    const timer = setTimeout(() => { try { p.kill(); } catch (e) {} done(null); }, 10000);
     p.stderr.on('data', d => output += d.toString());
     p.stdout.on('data', d => output += d.toString());
     p.on('close', code => {
-      if (code !== 0) return resolve(null);
-      // Match both "21.0.x" and "1.8.x" style version strings
+      if (code !== 0) return done(null);
+      // Matches both "21.0.5" and the legacy "1.8.0_432" style.
       const match = output.match(/version "(\d+)(?:\.(\d+))?/);
-      if (!match) return resolve(null);
-      const major = parseInt(match[1]);
-      const actual = major === 1 ? parseInt(match[2] || '0') : major;
-      console.log(`[Omnex] System Java version: ${actual} (required: ${requiredVersion})`);
-      // Must be EXACTLY the required version or higher - for MC we need 21
-      resolve(actual >= requiredVersion ? 'java' : null);
+      if (!match) return done(null);
+      const major = parseInt(match[1], 10);
+      done(major === 1 ? parseInt(match[2] || '0', 10) : major);
     });
-    p.on('error', () => resolve(null));
+    p.on('error', () => done(null));
   });
+}
+
+// Use the system Java only when it is the major this Minecraft asks for. Not
+// ">=": see getRequiredJavaVersion — a newer JRE breaks mods that pin the major,
+// and silently running one is worse than downloading the right JRE.
+async function getSystemJava(requiredVersion) {
+  const actual = await javaMajorOf('java');
+  if (actual === null) return null;
+  console.log(`[Omnex] System Java version: ${actual} (required: ${requiredVersion})`);
+  return actual === requiredVersion ? 'java' : null;
 }
 
 // Get or install Java for a specific server
@@ -83,23 +114,28 @@ async function ensureJava(serverId, mcVersion) {
   const requiredVersion = getRequiredJavaVersion(mcVersion);
   const server = appData.servers.find(s => s.id === serverId);
 
-  // 1. Check server-local Java — reject a cached JRE older than what's required
-  // (e.g. a previously-bundled Java 21 when the latest Minecraft now needs 25).
+  // 1. Check server-local Java — it must be the exact major this Minecraft wants,
+  // in either direction. A bundled Java 25 is just as wrong for 1.21.1 as a
+  // bundled Java 17 would be, because mods pin the major (see above).
   if (server?.javaExe && fs.existsSync(server.javaExe)) {
-    const staleRe = new RegExp('jdk-(' + Array.from({ length: requiredVersion - 8 }, (_, i) => i + 8).join('|') + ')[.\\-+]');
-    const pathHasOldVer = staleRe.test(server.javaExe);
-    if (pathHasOldVer) {
-      log(serverId, 'warn', `Cached Java is older than required (Java ${requiredVersion}); re-provisioning...`);
-      server.javaExe = null;
-      const oldJavaDir = path.join(server.installDir, '_java');
-      if (fs.existsSync(oldJavaDir)) {
-        try { fs.rmSync(oldJavaDir, { recursive: true, force: true }); } catch(e) {}
-      }
-      saveData();
-    } else {
-      log(serverId, 'dim', `Using bundled Java ${requiredVersion} for this server.`);
+    const have = await javaMajorOf(server.javaExe);
+    if (have === requiredVersion) {
+      log(serverId, 'dim', `Using bundled Java ${have} for this server.`);
       return server.javaExe;
     }
+    const want = `Java ${requiredVersion}` + (mcVersion ? ` that Minecraft ${mcVersion}` : ' this server');
+    log(serverId, 'warn', have
+      ? `Bundled Java ${have} is not the ${want} needs; re-provisioning...`
+      : 'Bundled Java could not be identified; re-provisioning...');
+    const stale = server.javaExe;
+    server.javaExe = null;
+    // Only remove a JRE Omnex itself put under the server's _java folder — never
+    // a Java the user pointed us at somewhere else.
+    const oldJavaDir = path.join(server.installDir, '_java');
+    if (stale.startsWith(oldJavaDir + path.sep) && fs.existsSync(oldJavaDir)) {
+      try { fs.rmSync(oldJavaDir, { recursive: true, force: true }); } catch(e) {}
+    }
+    saveData();
   }
 
   // 2. Check system Java
@@ -2577,7 +2613,11 @@ async function installFabric(serverId, installDir, version) {
     const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
     emit('console-progress', { serverId, text: `⬇  Fabric ${ver}  [${bar}] ${pct}%` });
   });
-  log(serverId,'success',`✔ Fabric ${ver} downloaded.`);
+  // Record the loader for .mrpack export: the single launcher server.jar leaves
+  // no libraries/ tree to read it back from.
+  const srv = appData.servers.find(s => s.installDir === installDir);
+  if (srv) { srv.loaderVersion = loader; saveData(); }
+  log(serverId,'success',`✔ Fabric ${ver} downloaded (loader ${loader}).`);
   return ver;
 }
 
@@ -2674,6 +2714,9 @@ async function installNeoForge(serverId, installDir, version) {
     const s2 = appData.servers.find(s => s.installDir === installDir);
     if (s2) { s2.execPath = runBat; s2.useShell = true; }
   }
+  // Record the loader version for .mrpack export.
+  const s3 = appData.servers.find(s => s.installDir === installDir);
+  if (s3) { s3.loaderVersion = pick; saveData(); }
   log(serverId, 'success', `✔ NeoForge ${pick} installed (Minecraft ${mcVer}).`);
   return mcVer;
 }
@@ -2709,6 +2752,10 @@ async function installForge(serverId, installDir, version) {
     const srv = appData.servers.find(s=>s.installDir===installDir);
     if (srv) { srv.execPath=runBat; srv.useShell=true; }
   }
+  // Record the loader version for .mrpack export. Forge names builds
+  // <mc>-<loader>; the pack wants just the loader part.
+  const srv2 = appData.servers.find(s=>s.installDir===installDir);
+  if (srv2) { srv2.loaderVersion = fVer; saveData(); }
   log(serverId,'success',`✔ Forge ${fullVer} installed.`);
   return mcVer;
 }
@@ -4354,6 +4401,8 @@ const MRPACK_LOADER_KEY = { fabric: 'fabric-loader', quilt: 'quilt-loader', forg
 // disk. Best effort: an export without it still imports, the user just picks the
 // loader build themselves.
 function detectLoaderVersion(server) {
+  // Recorded at install time, when we know it for certain.
+  if (server.loaderVersion) return server.loaderVersion;
   const dir = server.installDir;
   const firstDir = (...p) => {
     try { return fs.readdirSync(path.join(dir, ...p), { withFileTypes: true }).filter(d => d.isDirectory())[0]?.name || null; }
@@ -4367,7 +4416,18 @@ function detectLoaderVersion(server) {
   }
   if (server.mcType === 'fabric' || server.mcType === 'quilt') {
     const vendor = server.mcType === 'fabric' ? ['net', 'fabricmc', 'fabric-loader'] : ['org', 'quiltmc', 'quilt-loader'];
-    return firstDir('libraries', ...vendor);
+    const fromLibs = firstDir('libraries', ...vendor);
+    if (fromLibs) return fromLibs;
+    // Omnex installs Fabric as the single launcher server.jar, which has no
+    // libraries/ tree at all — the loader lands in .fabric/server/ on first run,
+    // named fabric-loader-server-<loader>-minecraft-<mc>.jar. Servers installed
+    // before loaderVersion was recorded are read back from there.
+    try {
+      for (const f of fs.readdirSync(path.join(dir, '.fabric', 'server'))) {
+        const m = f.match(/-loader-server-(.+?)-minecraft-/);
+        if (m) return m[1];
+      }
+    } catch (e) { /* never run, or not that layout */ }
   }
   return null;
 }
@@ -7494,16 +7554,20 @@ function getDirSize(dir) {
 }
 
 // ── Java check IPC ───────────────────────────────────────────────────────────
-ipcMain.handle('check-java', async (e, { serverId, mcVersion } = {}) => {
+ipcMain.handle('check-java', async (e, opts) => {
+  // Tolerate a bare id as well as { serverId, mcVersion } — older renderers sent one.
+  const { serverId, mcVersion } = (typeof opts === 'string' ? { serverId: opts } : (opts || {}));
   const server = serverId ? appData.servers.find(s => s.id === serverId) : null;
-  // Check server-local Java
+  const required = getRequiredJavaVersion(mcVersion || server?.mcVersion);
+  // Check server-local Java. Report what it actually is, not what we wish it were:
+  // a mismatch here is why a modded server refuses to start.
   if (server?.javaExe && fs.existsSync(server.javaExe)) {
-    return { found: true, exe: server.javaExe, version: getRequiredJavaVersion(mcVersion), local: true };
+    const have = await javaMajorOf(server.javaExe);
+    return { ok: have === required, found: true, exe: server.javaExe, version: have, required, local: true };
   }
   // Check system Java
-  const required = getRequiredJavaVersion(mcVersion);
   const sys = await getSystemJava(required);
-  return { found: !!sys, exe: sys, version: required, local: false };
+  return { ok: !!sys, found: !!sys, exe: sys, version: sys ? required : null, required, local: false };
 });
 
 // ── START / STOP ──────────────────────────────────────────────────────────────
@@ -7670,13 +7734,18 @@ async function startServerById(id) {
     }
     if (/\.(bat|cmd|sh)$/i.test(mcExec)) {
       // Modern Forge / NeoForge (1.17+): no runnable jar — they launch via a
-      // run script that invokes `java` with @args files. Run the script itself,
-      // but put our bundled Java first on PATH so it doesn't need a system JDK.
+      // run script that invokes `java` with @args files. Run the script itself.
       exe = mcExec;
       args = ['nogui'];
       forceShell = true;
-      spawnEnv = { ...process.env, PATH: path.dirname(javaExe) + path.delimiter + (process.env.PATH || '') };
-      log(id, 'dim', `Forge/NeoForge launch script detected — using bundled Java`);
+      // Put the Java we picked first on PATH so run.bat doesn't fall back to a
+      // system JDK of the wrong major. (When getSystemJava supplied a bare
+      // "java", there is no directory to prepend — it is already on PATH.)
+      const javaDir = javaExe.includes(path.sep) ? path.dirname(javaExe) : null;
+      spawnEnv = javaDir
+        ? { ...process.env, PATH: javaDir + path.delimiter + (process.env.PATH || '') }
+        : { ...process.env };
+      log(id, 'dim', `Forge/NeoForge launch script detected — using Java ${getRequiredJavaVersion(server.mcVersion)}`);
     } else {
       exe = javaExe;
       args = ['-Xmx2G','-Xms512M','-jar', mcExec, 'nogui'];

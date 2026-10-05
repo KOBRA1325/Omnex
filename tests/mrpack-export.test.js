@@ -99,5 +99,33 @@ check('minecraft version is always a dependency', handler.includes("minecraft: s
 check('loader key is mapped, not guessed', SRC.includes("MRPACK_LOADER_KEY = { fabric: 'fabric-loader', quilt: 'quilt-loader', forge: 'forge', neoforge: 'neoforge' }"), true);
 check('a cancelled save dialog is not an error', handler.includes('canceled: true'), true);
 
+// ── the loader version actually reaches the pack ─────────────────────────────
+// The first real export came back with only { minecraft: "1.21.1" } and no
+// fabric-loader: Omnex installs Fabric as the single launcher server.jar, which
+// has no libraries/ tree for detectLoaderVersion to read. So it is now recorded
+// at install time, with two fallbacks for servers installed before that.
+check('a recorded loaderVersion wins',
+  detectLoaderVersion({ installDir: tmp, mcType: 'fabric', loaderVersion: '0.19.5' }), '0.19.5');
+check('a recorded version is used for neoforge too',
+  detectLoaderVersion({ installDir: tmp, mcType: 'neoforge', loaderVersion: '21.1.252' }), '21.1.252');
+// Fallback for existing Fabric servers: the launcher unpacks the loader to
+// .fabric/server/fabric-loader-server-<loader>-minecraft-<mc>.jar on first run.
+const fabSrv = mkServer('fabric');
+fs.mkdirSync(path.join(fabSrv.installDir, '.fabric', 'server'), { recursive: true });
+fs.writeFileSync(path.join(fabSrv.installDir, '.fabric', 'server',
+  'fabric-loader-server-0.19.5-minecraft-1.21.1.jar'), 'x');
+check('the Fabric launcher layout is read back', detectLoaderVersion(fabSrv), '0.19.5');
+// A Fabric server that has never been started has neither — not an error.
+check('an unstarted Fabric server yields null', detectLoaderVersion(mkServer('fabric')), null);
+// libraries/ still wins over the .fabric guess when it exists (Forge-style installs).
+check('libraries/ is still preferred when present',
+  detectLoaderVersion(mkServer('fabric', 'libraries', 'net', 'fabricmc', 'fabric-loader', '0.16.9')), '0.16.9');
+
+// The installers have to record it, or the fallbacks are all there is.
+check('installFabric records the loader', grab(SRC, 'async function installFabric(').includes('srv.loaderVersion = loader'), true);
+check('installNeoForge records the loader', grab(SRC, 'async function installNeoForge(').includes('s3.loaderVersion = pick'), true);
+// Forge builds are named <mc>-<loader>; only the loader part belongs in the pack.
+check('installForge records just the loader part', grab(SRC, 'async function installForge(').includes('srv2.loaderVersion = fVer'), true);
+
 fs.rmSync(tmp, { recursive: true, force: true });
 report(state);

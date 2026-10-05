@@ -2946,11 +2946,16 @@ async function testServerWebhook(btn) {
 }
 
 // ── Java check ────────────────────────────────────────────────────────────────
+// Minecraft pins the Java major it needs, and modded servers refuse to start on
+// the wrong one, so say which Java this server will use — not just whether one
+// exists. (Pass an object: the handler reads { serverId }.)
 async function checkJavaStatus(id) {
   try {
-    const result = await window.nexus.checkJava(id);
-    if (!result.ok) appendLog('dim', `Java will be downloaded automatically the first time you start this server.`);
-    else appendLog('dim', `Java: ${result.version||'detected'}`);
+    const r = await window.nexus.checkJava({ serverId: id });
+    if (!r) return;
+    if (r.ok) appendLog('dim', `Java ${r.version} ready${r.local ? ' (bundled with this server)' : ' (from your system)'}.`);
+    else if (r.found) appendLog('warn', `This server has Java ${r.version || '?'} but Minecraft needs Java ${r.required} — Omnex will swap it on the next start.`);
+    else appendLog('dim', `Java ${r.required} will be downloaded automatically the first time you start this server.`);
   } catch(e) {}
 }
 
