@@ -2369,6 +2369,9 @@ function renderMinecraftConfig(card, props, arHtml, scope) {
     html += '</div>';
   }
   html += '</div>';
+  // Memory is not a server.properties key, so it gets a section of its own.
+  // The basic sidebar panel keeps to its three fields; this lives in Settings.
+  if (scope !== 'basic') html += '<div id="mcRamSection"></div>';
   html += arHtml;
   if (scope === 'basic') {
     html += `<button class="btn-save-config" style="margin-top:10px; background:transparent; border:1px solid var(--border); color:var(--text-dim); font-size:11px" onclick="openConfigModal()">⚙️ More Settings...</button>`;
@@ -2376,6 +2379,7 @@ function renderMinecraftConfig(card, props, arHtml, scope) {
     html += `<button class="btn-save-config" style="margin-top:10px" onclick="saveServerConfig()">💾 Save server.properties</button>`;
   }
   card.innerHTML = html;
+  if (scope !== 'basic') loadMcRamSection();
   window._mcProps = { ...props };
 }
 let _mcPropsCache = {};
@@ -2765,6 +2769,73 @@ async function saveAutoRestartField(field, value) {
   const s=getActive(); if(!s) return;
   autoRestartSettings[field]=value; await window.nexus.saveAutoRestart(s.id, autoRestartSettings);
   showToast('💾','Auto-restart settings saved');
+}
+
+
+// ── Minecraft memory allocation ──────────────────────────────────────────────
+// How much RAM a server gets is the knob modded packs actually need. It is not
+// a server.properties key, so it renders as its own section, and it is filled
+// in after the card paints: the limits come from the main process (this PC's
+// RAM), and for Forge/NeoForge the current value is read out of
+// user_jvm_args.txt rather than assumed.
+let _mcRam = null;
+
+const fmtRamMb = mb => (mb % 1024 === 0 ? (mb / 1024) + ' GB' : mb + ' MB');
+
+function mcRamNote(r) {
+  if (r.source === 'set')        return 'Allocated to this server.';
+  if (r.source === 'jvmargs')    return 'Read from user_jvm_args.txt.';
+  // Nobody chose this one — Forge/NeoForge with no -Xmx lets the JVM take about
+  // a quarter of the machine, which is how a server quietly balloons.
+  if (r.source === 'jvmdefault') return 'Java’s own default. Move the slider to pin it.';
+  return 'Omnex’s default — raise it for a modded pack.';
+}
+
+async function loadMcRamSection() {
+  const host = document.getElementById('mcRamSection');
+  const s = getActive();
+  if (!host || !s) return;
+  let r;
+  try { r = await window.nexus.getServerRam(s.id); } catch (e) { host.remove(); return; }
+  if (!r || !r.ok) { host.remove(); return; }
+  _mcRam = r;
+  const cur = Math.max(r.minMb, Math.min(r.mb, r.maxMb));
+  host.innerHTML = `<div class="config-group"><div class="config-group-label">☕ Memory</div>
+    <div class="config-row" style="align-items:flex-start">
+      <div class="config-label">Allocated RAM
+        <div class="config-desc" id="mcRamNote" style="font-size:10px;color:var(--text-dim);margin-top:2px;font-weight:normal">${mcRamNote(r)}</div>
+      </div>
+      <div style="flex:1;min-width:160px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="range" class="ram-slider" id="mcRamSlider"
+                 min="${r.minMb}" max="${r.maxMb}" step="${r.stepMb}" value="${cur}"
+                 oninput="onMcRamInput(this.value)" onchange="saveMcRam(this.value)">
+          <span id="mcRamValue">${fmtRamMb(cur)}</span>
+        </div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:5px">
+          ${fmtRamMb(r.minMb)} – ${fmtRamMb(r.maxMb)} · ${Math.round(r.totalMb / 1024)} GB installed
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function onMcRamInput(v) {
+  const el = document.getElementById('mcRamValue');
+  if (el) el.textContent = fmtRamMb(Number(v));
+}
+
+// Fires when the handle is released, not on every pixel of the drag.
+async function saveMcRam(v) {
+  const s = getActive(); if (!s) return;
+  try {
+    const r = await window.nexus.setServerRam(s.id, Number(v));
+    if (!r || !r.ok) { showToast('❌', (r && r.error) || 'Could not set the memory limit'); return; }
+    if (_mcRam) { _mcRam.mb = r.mb; _mcRam.source = 'set'; }
+    const note = document.getElementById('mcRamNote');
+    if (note) note.textContent = mcRamNote({ source: 'set' });
+    showToast('💾', `Memory set to ${fmtRamMb(r.mb)}${r.restartNeeded ? ' — restart to apply' : ''}`);
+  } catch (e) { showToast('❌', e.message); }
 }
 
 // ── Network Card ──────────────────────────────────────────────────────────────

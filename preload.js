@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('nexus', {
   getFabricVersions:    () => ipcRenderer.invoke('get-fabric-versions'),
   getForgeVersions:     () => ipcRenderer.invoke('get-forge-versions'),
   checkJava:            (opts) => ipcRenderer.invoke('check-java', opts),
+  getServerRam:         (id) => ipcRenderer.invoke('get-server-ram', id),
+  setServerRam:         (serverId, mb) => ipcRenderer.invoke('set-server-ram', { serverId, mb }),
   readServerConfig:    (id)                   => ipcRenderer.invoke('read-server-config', id),
   writeServerConfig:   (id, props)               => ipcRenderer.invoke('write-server-config', { id, props }),
   writeSteamConfig:    (id, props, configPath)    => ipcRenderer.invoke('write-steam-config', { id, props, configPath }),

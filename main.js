@@ -228,6 +228,100 @@ async function ensureJava(serverId, mcVersion) {
   return javaExe;
 }
 
+// ── Per-server Java heap ─────────────────────────────────────────────────────
+// How much RAM a Minecraft server gets is the setting people most often need to
+// change, and the right answer depends entirely on the pack: vanilla is content
+// with 2GB, a sixty-mod pack is not.
+//
+// Forge and NeoForge need a second step. They launch through run.bat, which
+// reads its JVM arguments from user_jvm_args.txt and never sees the command
+// line Omnex builds — so the heap has to be written into that file as well.
+const MC_RAM_MIN_MB     = 512;
+const MC_RAM_DEFAULT_MB = 2048;   // what Omnex has always passed; unchanged for servers that never set one
+const MC_RAM_STEP_MB    = 512;
+
+const fmtRam = mb => (mb % 1024 === 0 ? (mb / 1024) + 'GB' : mb + 'MB');
+
+// The JVM reserves the whole heap up front, so leave the OS and Omnex room to
+// work in. Reserve a fifth, never less than 2GB and never more than 8.
+function mcRamLimits() {
+  const os = require('os');
+  const totalMb = Math.floor(os.totalmem() / (1024 * 1024));
+  const reserve = Math.min(8192, Math.max(2048, Math.round(totalMb * 0.2)));
+  const maxMb = Math.max(MC_RAM_MIN_MB, Math.floor((totalMb - reserve) / MC_RAM_STEP_MB) * MC_RAM_STEP_MB);
+  return { totalMb, minMb: MC_RAM_MIN_MB, maxMb, stepMb: MC_RAM_STEP_MB };
+}
+
+const usesJvmArgsFile = server => server.mcType === 'forge' || server.mcType === 'neoforge';
+const userJvmArgsPath = server => path.join(server.installDir, 'user_jvm_args.txt');
+
+// Read Forge/NeoForge's file of record rather than assume what is in it: the
+// user may have edited it by hand, and that value is what the server really
+// runs with.
+function readJvmArgsRam(server) {
+  let txt;
+  try { txt = fs.readFileSync(userJvmArgsPath(server), 'utf8'); } catch (e) { return null; }
+  for (const line of txt.split(/\r?\n/)) {
+    if (/^\s*#/.test(line)) continue;
+    const m = line.match(/-Xmx(\d+)([gGmM])/);
+    if (m) return m[2].toLowerCase() === 'g' ? Number(m[1]) * 1024 : Number(m[1]);
+  }
+  return null;
+}
+
+// Replace only the heap arguments, keeping every other line — including the
+// file's own comments, which explain the format to anyone who opens it.
+function writeJvmArgsRam(server, mb) {
+  let lines = [];
+  try { lines = fs.readFileSync(userJvmArgsPath(server), 'utf8').split(/\r?\n/); } catch (e) {}
+  const kept = lines.filter(l => !/^\s*-Xm[xs]\d/.test(l));
+  while (kept.length && !kept[kept.length - 1].trim()) kept.pop();
+  kept.push(`-Xmx${mb}M`, `-Xms${Math.min(512, mb)}M`, '');
+  fs.writeFileSync(userJvmArgsPath(server), kept.join('\r\n'));
+}
+
+// What this server will actually launch with, and where that number came from —
+// the UI says so, because "2GB" means something different when it is a value
+// the user chose than when it is a JVM default nobody picked.
+function serverRamInfo(server) {
+  if (Number.isFinite(server.ramMb)) return { mb: server.ramMb, source: 'set' };
+  if (usesJvmArgsFile(server) && server.installDir) {
+    const fromFile = readJvmArgsRam(server);
+    if (fromFile) return { mb: fromFile, source: 'jvmargs' };
+    // run.bat with no -Xmx at all: the JVM helps itself to about a quarter of
+    // system RAM, which is why a Forge server can quietly balloon.
+    const { totalMb } = mcRamLimits();
+    return { mb: Math.round(totalMb / 4 / MC_RAM_STEP_MB) * MC_RAM_STEP_MB, source: 'jvmdefault' };
+  }
+  return { mb: MC_RAM_DEFAULT_MB, source: 'default' };
+}
+
+ipcMain.handle('get-server-ram', (e, id) => {
+  const server = appData.servers.find(s => s.id === id);
+  if (!server) return { ok: false, error: 'Server not found' };
+  if (server.game !== 'Minecraft') return { ok: false, error: 'Memory allocation is a Minecraft setting.' };
+  return { ok: true, ...serverRamInfo(server), ...mcRamLimits(), mcType: server.mcType || 'vanilla' };
+});
+
+ipcMain.handle('set-server-ram', (e, { serverId, mb }) => {
+  const server = appData.servers.find(s => s.id === serverId);
+  if (!server) return { ok: false, error: 'Server not found' };
+  const { minMb, maxMb } = mcRamLimits();
+  const want = Math.round(Number(mb) / MC_RAM_STEP_MB) * MC_RAM_STEP_MB;
+  if (!Number.isFinite(want) || want < minMb || want > maxMb) {
+    return { ok: false, error: `Pick a value between ${fmtRam(minMb)} and ${fmtRam(maxMb)}.` };
+  }
+  server.ramMb = want;
+  if (usesJvmArgsFile(server) && server.installDir) {
+    try { writeJvmArgsRam(server, want); }
+    catch (err) { return { ok: false, error: 'Could not write user_jvm_args.txt: ' + err.message }; }
+  }
+  saveData();
+  const running = !!serverProcesses[serverId];
+  log(serverId, 'info', `Memory set to ${fmtRam(want)}${running ? ' — restart to apply it.' : '.'}`);
+  return { ok: true, mb: want, restartNeeded: running };
+});
+
 
 // ── Taskbar badge ─────────────────────────────────────────────────────────────
 function updateTaskbarBadge() {
@@ -7746,9 +7840,17 @@ async function startServerById(id) {
         ? { ...process.env, PATH: javaDir + path.delimiter + (process.env.PATH || '') }
         : { ...process.env };
       log(id, 'dim', `Forge/NeoForge launch script detected — using Java ${getRequiredJavaVersion(server.mcVersion)}`);
+      // run.bat takes its heap from user_jvm_args.txt, not from our args, so
+      // keep that file in step with the allocation on every start.
+      if (Number.isFinite(server.ramMb)) {
+        try { writeJvmArgsRam(server, server.ramMb); }
+        catch (err) { log(id, 'warn', `Could not set the memory limit: ${err.message}`); }
+      }
     } else {
       exe = javaExe;
-      args = ['-Xmx2G','-Xms512M','-jar', mcExec, 'nogui'];
+      // The heap the user allocated for this server (see serverRamInfo).
+      const heapMb = serverRamInfo(server).mb;
+      args = [`-Xmx${heapMb}M`, `-Xms${Math.min(512, heapMb)}M`, '-jar', mcExec, 'nogui'];
     }
   } else if (server.game === 'Terraria' && server.terrariaType === 'tmodloader') {
     // Launch the .NET server DIRECTLY (dotnet tModLoader.dll) instead of the

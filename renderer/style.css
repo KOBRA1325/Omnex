@@ -633,6 +633,28 @@ input, textarea, select, .console-input, .console-output, .config-input {
   font-size: 11px; padding: 6px 8px; outline: none; transition: border-color 0.15s;
 }
 .config-input:focus { border-color: var(--accent); }
+/* RAM allocation slider. The track is drawn on the input itself rather than a
+   wrapper so it scales with --app-text-scale like every other config control. */
+.ram-slider {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; min-width: 90px; height: 4px; margin: 0;
+  background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
+}
+.ram-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--panel);
+  box-shadow: 0 0 0 1px var(--accent); cursor: grab; transition: transform 0.12s;
+}
+.ram-slider:hover::-webkit-slider-thumb { transform: scale(1.15); }
+.ram-slider:active::-webkit-slider-thumb { cursor: grabbing; transform: scale(1.15); }
+.ram-slider:focus-visible { box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.3); }
+#mcRamValue {
+  min-width: 56px; text-align: right; color: var(--accent);
+  font-family: 'Share Tech Mono', monospace; font-size: 12px; white-space: nowrap;
+}
+/* The note is a sentence, not a field name — opt out of .config-label's caps. */
+#mcRamNote { text-transform: none; letter-spacing: 0; }
 .btn-save-config {
   width: 100%; padding: 7px; border-radius: 5px; border: 1px solid var(--accent);
   background: rgba(var(--accent-rgb),0.06); color: var(--accent);
